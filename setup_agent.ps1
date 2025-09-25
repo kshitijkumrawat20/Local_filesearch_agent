@@ -95,7 +95,10 @@ try {
     Write-Host "Creating virtual environment with Python 3.13..." -ForegroundColor Cyan
     & uv venv --python 3.13
     
-    Write-Host "✅ Virtual environment created" -ForegroundColor Green
+    Write-Host "Activating virtual environment..." -ForegroundColor Cyan
+    & .\.venv\Scripts\Activate.ps1
+    
+    Write-Host "✅ Virtual environment created and activated" -ForegroundColor Green
 }
 catch {
     Write-Host "❌ Failed to create virtual environment: $_" -ForegroundColor Red

@@ -6,7 +6,7 @@ echo ============================================================
 echo.
 
 REM Set variables
-set INSTALL_DIR=%USERPROFILE%\Local_filesearch_agent
+set INSTALL_DIR=%CD%\Local_filesearch_agent
 set REPO_URL=https://github.com/kshitijkumrawat20/Local_filesearch_agent/archive/refs/heads/main.zip
 set ZIP_FILE=%TEMP%\Local_filesearch_agent.zip
 
@@ -51,6 +51,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+
 REM Extract repository
 echo Extracting archive...
 powershell -Command "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%TEMP%' -Force"
@@ -74,6 +75,14 @@ echo Creating virtual environment with Python 3.13...
 uv venv --python 3.13
 if %ERRORLEVEL% NEQ 0 (
     echo Failed to create virtual environment
+    pause
+    exit /b 1
+)
+
+echo Activating virtual environment...
+call .venv\Scripts\activate
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to activate virtual environment
     pause
     exit /b 1
 )
