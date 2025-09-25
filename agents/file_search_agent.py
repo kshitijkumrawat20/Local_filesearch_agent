@@ -40,9 +40,6 @@ class FileSearchAgent:
             # temperature=0,
             # max_retries=2,
             api_key=self.api_key
-            # base_url="...",
-            # organization="...",
-            # other params...
         )
     
     def _build_graph(self) -> StateGraph:
@@ -91,8 +88,10 @@ class FileSearchAgent:
         - You have access to the following drives: {result}. *Must* ask the user which drive to search.
         - Use FileManagement tools to list directory contents
         - Use Shell tools to navigate and open files
+        - Use the 'create_vector_store_and_query' tool to read and query file contents
         - Reason about file locations based on common Windows directory structures
         - Answer questions and provide guidance about file management
+
         
         Guidelines:
         - *Always* start by listing available drives when helping with file searches
@@ -102,6 +101,7 @@ class FileSearchAgent:
         - Open files using their full Windows path format
         - Be thorough but efficient in your search strategy
         - Provide helpful suggestions when files aren't found
+        - If User ask for finding a file only then then open it, If user wants to read or query the content of the file then create a vector store from the file and then query it. Use the tool 'create_vector_store_and_query' for this purpose.
         """
     
     def process_message(self, user_input: str, thread_id: str = None, callbacks: List = None) -> dict:
