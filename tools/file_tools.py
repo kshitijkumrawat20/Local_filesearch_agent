@@ -1,3 +1,4 @@
+import base64
 """
 File management and shell tools for the AI agent.
 """
@@ -12,6 +13,10 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import PyMuPDFLoader, Docx2txtLoader
 from langchain_community.document_loaders import UnstructuredExcelLoader
 import requests
+from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
+from langchain_community.document_loaders import UnstructuredPowerPointLoader
+
 class FileTools:
     """Wrapper class for file management tools."""
     
@@ -30,7 +35,8 @@ class FileTools:
             # list_directory,
             open_file_tool,
             create_vector_store_and_query,
-            search_file
+            search_file,
+            extract_image_text
         ]
 
 
@@ -78,6 +84,9 @@ def create_vector_store_and_query(file_path: str, query: str) -> str:
         elif file_path.lower().endswith('.xlsx'):
             loader = UnstructuredExcelLoader(file_path)
             documents.extend(loader.load())
+        elif file_path.lower().endswith('.pptx'):
+            loader = UnstructuredPowerPointLoader(file_path)
+            documents.extend(loader.load())
         else:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -96,7 +105,7 @@ def create_vector_store_and_query(file_path: str, query: str) -> str:
         # Process the results as needed
         for result in results:
             print(f"Found similar document: {result}")
-        result_summaries = [doc.page_content[:200] + "..." for doc in results]
+        result_summaries = [doc.page_content[:500] + "..." for doc in results]
         return "\n\n".join(result_summaries)
         # Save the vector store to a persistent location if needed
         # vector_store.persist("path_to_persist_vector_store")
@@ -106,57 +115,57 @@ def create_vector_store_and_query(file_path: str, query: str) -> str:
         print(f"[VERBOSE] {error_msg}")
         return error_msg
     
-@tool
-def list_directory(directory_path: str, required_extension_file: List[str]) -> List[str]:
-    """
-    Lists all files in the specified directory and subdirectories.
+# @tool
+# def list_directory(directory_path: str, required_extension_file: List[str]) -> List[str]:
+#     """
+#     Lists all files in the specified directory and subdirectories.
 
-    Args:
-        directory_path (str): The path to the directory to scan.
-        required_extension_file: Required file extension (e.g., .txt, .pdf,)
+#     Args:
+#         directory_path (str): The path to the directory to scan.
+#         required_extension_file: Required file extension (e.g., .txt, .pdf,)
 
-    Returns:
-        list: A list of full file paths (strings) matching the criteria with allowed extension and without extension are folders.
-    """
-    print(f"[VERBOSE] Listing files in directory: {directory_path} with extensions: {required_extension_file}")
-    toolkit = FileManagementToolkit()
-    file_management_tools = toolkit.get_tools()
-    list_dir = file_management_tools[6]  # Assuming the 7th tool is the list directory tool
-    result = list_dir.invoke(input=directory_path)
-    result= result.split("\n")
-    print(f"[VERBOSE] Raw list directory result: {result}")
-    # allowed_extensions = ('.pdf', '.ppt', '.pptx', '.xls', '.xlsx','.csv', '.doc', '.docx', '.jpg', '.jpeg', '.png')
-    allowed_extensions = tuple(required_extension_file)
+#     Returns:
+#         list: A list of full file paths (strings) matching the criteria with allowed extension and without extension are folders.
+#     """
+#     print(f"[VERBOSE] Listing files in directory: {directory_path} with extensions: {required_extension_file}")
+#     toolkit = FileManagementToolkit()
+#     file_management_tools = toolkit.get_tools()
+#     list_dir = file_management_tools[6]  # Assuming the 7th tool is the list directory tool
+#     result = list_dir.invoke(input=directory_path)
+#     result= result.split("\n")
+#     print(f"[VERBOSE] Raw list directory result: {result}")
+#     # allowed_extensions = ('.pdf', '.ppt', '.pptx', '.xls', '.xlsx','.csv', '.doc', '.docx', '.jpg', '.jpeg', '.png')
+#     allowed_extensions = tuple(required_extension_file)
     
-    filtered_files = []
+#     filtered_files = []
     
-    # Walk through only the specified directory with subdirectories
-    for file in result:
-        if (os.path.isfile(file) and file.lower().endswith(allowed_extensions)) or os.path.isdir(file):
-            filtered_files.append(file)
-            if os.path.isdir(file):
-                # If it's a directory, list its contents (limited to 50 files)
-                file_count = 0
-                for root, dirs, files in os.walk(file):
-                    for f in files:
-                        if f.lower().endswith(allowed_extensions):
-                            filtered_files.append(os.path.join(root, f))
-                            file_count += 1
-                            if file_count >= 50:
-                                break
-                    if file_count >= 50:
-                        break
+#     # Walk through only the specified directory with subdirectories
+#     for file in result:
+#         if (os.path.isfile(file) and file.lower().endswith(allowed_extensions)) or os.path.isdir(file):
+#             filtered_files.append(file)
+#             if os.path.isdir(file):
+#                 # If it's a directory, list its contents (limited to 50 files)
+#                 file_count = 0
+#                 for root, dirs, files in os.walk(file):
+#                     for f in files:
+#                         if f.lower().endswith(allowed_extensions):
+#                             filtered_files.append(os.path.join(root, f))
+#                             file_count += 1
+#                             if file_count >= 50:
+#                                 break
+#                     if file_count >= 50:
+#                         break
 
-    # # Walk through directory and all subdirectories
-    # for root, dirs, files in os.walk(directory_path):
-    #     for i,file in enumerate(files):
-    #         if file.lower().endswith(allowed_extensions):
-    #             if i==0:
-    #                 filtered_files.append(os.path.join(root, file))
-    #             else:
-    #                 filtered_files.append(os.path.join(file))
-    print(f"[VERBOSE] Filtered files: {filtered_files}")
-    return filtered_files
+#     # # Walk through directory and all subdirectories
+#     # for root, dirs, files in os.walk(directory_path):
+#     #     for i,file in enumerate(files):
+#     #         if file.lower().endswith(allowed_extensions):
+#     #             if i==0:
+#     #                 filtered_files.append(os.path.join(root, file))
+#     #             else:
+#     #                 filtered_files.append(os.path.join(file))
+#     print(f"[VERBOSE] Filtered files: {filtered_files}")
+#     return filtered_files
 
 @tool 
 def search_file(query:str)->str:
@@ -172,6 +181,48 @@ def search_file(query:str)->str:
         search_results += f"{file['path']+'\\'+file['name']} ;"
     print(search_results)
     return search_results
+
+@tool
+def extract_image_text(image_path: str) -> str:
+    """Extract text from an image file using OCR."""
+    try:
+        if not os.path.exists(image_path) or not os.path.isfile(image_path):
+            return f"File does not exist: {image_path}"
+        
+        ## finding image extension
+        image_filename, image_extension = os.path.splitext(image_path)
+        image_extension = image_extension.lower()
+
+        ## adding images encoding as tool
+        with open(image_path, "rb") as image_file:
+            encoding = base64.b64encode(image_file.read()).decode('utf-8')
+
+        # Initialize the OpenAI multimodal model
+        llm = ChatOpenAI(model="gpt-4o-mini", max_tokens=1024)
+
+        # Create the message payload for the chat model
+        message = HumanMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": "Extract all the text from this image and list it clearly."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/{image_extension};base64,{encoding}"},
+                },
+            ]
+        )
+
+        # Invoke the model
+        response = llm.invoke([message])
+
+        return response.content
+    except Exception as e:
+        error_msg = f"Error extracting text from image {image_path}: {str(e)}"
+        print(f"[VERBOSE] {error_msg}")
+        return error_msg
+
 
 
 def get_file_tools(root_dir: str = "C:\\") -> List:

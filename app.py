@@ -239,5 +239,16 @@ def main():
     app.run()
 
 
+# Add to app.py
+import sys
+import subprocess
+
 if __name__ == "__main__":
-    main()
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller executable
+        import streamlit.web.cli as stcli
+        sys.argv = ["streamlit", "run", __file__, "--server.headless", "true"]
+        stcli.main()
+    else:
+        # Running normally
+        main()
