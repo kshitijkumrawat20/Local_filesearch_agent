@@ -1501,6 +1501,7 @@ dependencies = [
     { name = "pymupdf" },
     { name = "pypdf" },
     { name = "pypika" },
+    { name = "pypiwin32" },
     { name = "pyproject-hooks" },
     { name = "pyreadline3" },
     { name = "pytest" },
@@ -1705,6 +1706,7 @@ requires-dist = [
     { name = "pymupdf", specifier = "==1.26.4" },
     { name = "pypdf", specifier = "==6.1.0" },
     { name = "pypika", specifier = "==0.48.9" },
+    { name = "pypiwin32", specifier = ">=223" },
     { name = "pyproject-hooks", specifier = "==1.2.0" },
     { name = "pyreadline3", specifier = "==3.5.4" },
     { name = "pytest", specifier = "==8.4.2" },
@@ -2855,6 +2857,18 @@ name = "pypika"
 version = "0.48.9"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c7/2c/94ed7b91db81d61d7096ac8f2d325ec562fc75e35f3baea8749c85b28784/PyPika-0.48.9.tar.gz", hash = "sha256:838836a61747e7c8380cd1b7ff638694b7a7335345d0f559b04b2cd832ad5378", size = 67259, upload-time = "2022-03-15T11:22:57.066Z" }
+
+[[package]]
+name = "pypiwin32"
+version = "223"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/13/e8/4f38eb30c4dae36634a53c5b2cd73b517ea3607e10d00f61f2494449cec0/pypiwin32-223.tar.gz", hash = "sha256:71be40c1fbd28594214ecaecb58e7aa8b708eabfa0125c8a109ebd51edbd776a", size = 622, upload-time = "2018-02-26T00:43:23.994Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/1b/2f292bbd742e369a100c91faa0483172cd91a1a422a6692055ac920946c5/pypiwin32-223-py3-none-any.whl", hash = "sha256:67adf399debc1d5d14dffc1ab5acacb800da569754fafdc576b2a039485aa775", size = 1674, upload-time = "2018-02-26T00:43:23.108Z" },
+]
 
 [[package]]
 name = "pyproject-hooks"

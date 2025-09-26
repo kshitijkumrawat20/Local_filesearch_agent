@@ -54,6 +54,9 @@ class StreamlitApp:
         if "current_tool_calls" not in st.session_state:
             st.session_state.current_tool_calls = []
         
+        if "current_tool_responses" not in st.session_state:
+            st.session_state.current_tool_responses = []
+        
         if "agent_status" not in st.session_state:
             st.session_state.agent_status = "Idle"
     
@@ -109,20 +112,46 @@ class StreamlitApp:
                 verbose_info = response["verbose_info"]
                 
                 with activity_container:
-                    if verbose_info.get("tool_calls"):
+                    if verbose_info.get("tool_calls") or verbose_info.get("tool_responses"):
                         st.success("✅ Agent completed processing")
                         with st.expander("🔧 Tool Usage Details", expanded=False):
-                            for i, tc in enumerate(verbose_info["tool_calls"], 1):
-                                st.write(f"**{i}. Tool Used:** `{tc['name']}`")
-                                if tc.get('args'):
-                                    st.json(tc['args'])
-                                st.write("---")
+                            # Display tool calls
+                            if verbose_info.get("tool_calls"):
+                                st.write("**🛠️ Tools Used:**")
+                                for i, tc in enumerate(verbose_info["tool_calls"], 1):
+                                    st.write(f"**{i}. Tool Used:** `{tc['name']}`")
+                                    if tc.get('args'):
+                                        st.json(tc['args'])
+                                    st.write("---")
+                            
+                            # Display tool responses
+                            if verbose_info.get("tool_responses"):
+                                st.write("**📋 Tool Results:**")
+                                for i, tr in enumerate(verbose_info["tool_responses"], 1):
+                                    st.write(f"**Result {i} ({tr.get('tool_name', 'Unknown')}):**")
+                                    response_content = tr.get('content', 'No response')
+                                    if len(response_content) > 300:
+                                        with st.expander(f"View Full Result {i}", expanded=False):
+                                            st.text(response_content)
+                                    else:
+                                        st.info(response_content)
+                                    st.write("---")
                 
                 # Update verbose session state
                 st.session_state.current_tool_calls = [
                     f"{tc['name']}({tc.get('args', {})})" 
                     for tc in verbose_info.get("tool_calls", [])
                 ]
+                
+                # Add tool responses to session state
+                if "current_tool_responses" not in st.session_state:
+                    st.session_state.current_tool_responses = []
+                
+                st.session_state.current_tool_responses = [
+                    f"{tr.get('tool_name', 'Unknown')}: {tr.get('content', 'No response')[:100]}..." 
+                    for tr in verbose_info.get("tool_responses", [])
+                ]
+                
                 st.session_state.agent_status = "Processing completed"
                 
                 # Update thread_id if it was auto-generated

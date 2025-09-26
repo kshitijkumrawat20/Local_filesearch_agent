@@ -46,13 +46,31 @@ class ChatUI:
     @staticmethod
     def _display_verbose_info(message: Dict[str, Any]):
         """Display simplified verbose information for AI messages."""
-        if message.get("tool_calls"):
-            with st.expander("🔧 Tool Calls", expanded=False):
-                for tool_call in message["tool_calls"]:
-                    st.write(f"**Tool:** {tool_call.get('name', 'Unknown')}")
-                    if tool_call.get('args'):
-                        st.code(str(tool_call.get('args', {})), language="json")
-                    st.divider()
+        if message.get("tool_calls") or message.get("tool_responses"):
+            with st.expander("🔧 Tool Calls & Results", expanded=False):
+                # Display tool calls
+                if message.get("tool_calls"):
+                    st.write("**🛠️ Tools Used:**")
+                    for i, tool_call in enumerate(message["tool_calls"], 1):
+                        st.write(f"**{i}. {tool_call.get('name', 'Unknown')}**")
+                        if tool_call.get('args'):
+                            st.code(str(tool_call.get('args', {})), language="json")
+                        st.divider()
+                
+                # Display tool responses
+                if message.get("tool_responses"):
+                    st.write("**📋 Tool Results:**")
+                    for i, tool_response in enumerate(message["tool_responses"], 1):
+                        st.write(f"**Result {i} ({tool_response.get('tool_name', 'Unknown')}):**")
+                        # Display the tool response content in a nice format
+                        response_content = tool_response.get('content', 'No response')
+                        if len(response_content) > 500:
+                            # For long responses, show in expandable section
+                            with st.expander(f"View Full Result {i}", expanded=False):
+                                st.text(response_content)
+                        else:
+                            st.info(response_content)
+                        st.divider()
     
     @staticmethod
     def display_verbose_panel():
@@ -63,6 +81,11 @@ class ChatUI:
                     st.write("**Recent Tool Calls:**")
                     for tool_call in st.session_state.current_tool_calls[-5:]:  # Show last 5
                         st.text(f"• {tool_call}")
+                
+                if st.session_state.get("current_tool_responses"):
+                    st.write("**Recent Tool Results:**")
+                    for tool_response in st.session_state.current_tool_responses[-3:]:  # Show last 3
+                        st.text(f"• {tool_response}")
                 
                 if st.session_state.get("agent_status"):
                     st.write(f"**Status:** {st.session_state.agent_status}")
@@ -119,6 +142,7 @@ class SidebarUI:
         if st.sidebar.button("🗑️ Clear Conversation"):
             st.session_state.chat_history = []
             st.session_state.current_tool_calls = []
+            st.session_state.current_tool_responses = []
             st.session_state.agent_status = "Idle"
             # Generate new thread ID when clearing
             import uuid
