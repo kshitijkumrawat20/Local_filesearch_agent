@@ -20,7 +20,11 @@ def get_api_key() -> str:
 def get_llm_config() -> Dict[str, Any]:
     """Get LLM configuration settings."""
     return {
+<<<<<<< HEAD
         "model": "gpt-4o",  # or "qwen/qwen3-32b"
+=======
+        "model": "gpt-4o-mini",  # or "qwen/qwen3-32b"
+>>>>>>> 4c37844935e036cc031fd3c33ab0f8c036c2df23
         "temperature": 0.1,
         "max_tokens": 2048
     }
