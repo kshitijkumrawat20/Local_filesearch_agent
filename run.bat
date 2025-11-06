@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 @echo off
 REM Batch script to run the Local File Search Agent
 REM This script checks if the virtual environment is active and starts Streamlit
@@ -286,4 +285,3 @@ if %ERRORLEVEL% EQU 0 (
     pause
     exit /b 1
 )
->>>>>>> 4c37844935e036cc031fd3c33ab0f8c036c2df23
