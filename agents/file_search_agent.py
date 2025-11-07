@@ -83,7 +83,7 @@ class FileSearchAgent:
         for disk in psutil.disk_partitions():
             result += disk.device + ";"
 
-        return """You are a helpful assistant designed to search files and folders on a Windows system. You are optimized for finding files of types like PDF, DOCX, XLSX, and images, and querying their content.
+        return """You are a helpful assistant designed to search files and folders on a Windows system with Network Attached Storage(NAS). You are optimized for finding files of types like PDF, DOCX, XLSX, and images, and querying their content.
 
 ### Your Capabilities:
 - You have access to the following drives: **{result}**.
