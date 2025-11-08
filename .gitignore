@@ -14,3 +14,7 @@ env/
 .env.development.local
 .env.test.local
 .env.production.local
+
+
+c_drive_file_index.json
+chroma_db/

@@ -7,6 +7,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, AIMessage
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 import psutil
 from tools.file_tools import get_file_tools
@@ -36,11 +37,16 @@ class FileSearchAgent:
         #     temperature=config["temperature"]
         # )
 
-        return ChatOpenAI(
-            model=config["model"],
-            # temperature=0,
-            # max_retries=2,
-            api_key=self.api_key
+        # return ChatOpenAI(
+        #     model=config["model"],
+        #     # temperature=0,
+        #     # max_retries=2,
+        #     api_key=self.api_key
+        # )
+        llm = ChatOllama(
+            model="granite4:latest",
+            temperature=0,
+            # other params...
         )
     
     def _build_graph(self) -> StateGraph:
