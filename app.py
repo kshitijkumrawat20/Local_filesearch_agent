@@ -5,6 +5,7 @@ import streamlit as st
 import os
 import sys
 import uuid
+import psutil
 from typing import Dict, Any
 
 # Add project root to path
@@ -44,6 +45,97 @@ class StreamlitApp:
         
         if "current_directory" not in st.session_state:
             st.session_state.current_directory = self.app_config["default_root_dir"]
+    
+    def get_available_drives(self) -> list:
+        """Get list of available drives with details."""
+        drives = []
+        try:
+            for partition in psutil.disk_partitions():
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    # Convert bytes to GB
+                    total_gb = round(usage.total / (1024**3), 2)
+                    used_gb = round(usage.used / (1024**3), 2)
+                    free_gb = round(usage.free / (1024**3), 2)
+                    used_percent = round((usage.used / usage.total) * 100, 1) if usage.total > 0 else 0
+                    
+                    drives.append({
+                        'drive': partition.mountpoint,
+                        'device': partition.device,
+                        'fstype': partition.fstype,
+                        'total_gb': total_gb,
+                        'used_gb': used_gb,
+                        'free_gb': free_gb,
+                        'used_percent': used_percent
+                    })
+                except (PermissionError, OSError) as e:
+                    # Some drives might not be accessible
+                    drives.append({
+                        'drive': partition.mountpoint,
+                        'device': partition.device,
+                        'fstype': partition.fstype,
+                        'total_gb': 'N/A',
+                        'used_gb': 'N/A',
+                        'free_gb': 'N/A',
+                        'used_percent': 'N/A',
+                        'error': str(e)
+                    })
+        except Exception as e:
+            st.error(f"Error getting drive information: {e}")
+        
+        return drives
+
+    def display_drives_section(self):
+        """Display available drives section for testing."""
+        st.markdown("### 💾 Available Drives (Testing)")
+        
+        drives = self.get_available_drives()
+        
+        if not drives:
+            st.warning("No drives detected.")
+            return
+        
+        # Create expandable section for drives
+        with st.expander("🔍 View Available Drives", expanded=False):
+            for i, drive in enumerate(drives):
+                col1, col2, col3 = st.columns([2, 3, 2])
+                
+                with col1:
+                    if 'error' in drive:
+                        st.markdown(f"**{drive['drive']}** ❌")
+                        st.caption(f"Error: {drive['error']}")
+                    else:
+                        st.markdown(f"**{drive['drive']}** ✅")
+                        st.caption(f"Type: {drive['fstype']}")
+                
+                with col2:
+                    if drive['total_gb'] != 'N/A':
+                        # Create a progress bar for disk usage
+                        progress_value = drive['used_percent'] / 100 if drive['used_percent'] != 'N/A' else 0
+                        st.progress(progress_value)
+                        st.caption(f"Used: {drive['used_gb']} GB / Total: {drive['total_gb']} GB ({drive['used_percent']}%)")
+                    else:
+                        st.caption("Storage information unavailable")
+                
+                with col3:
+                    if drive['free_gb'] != 'N/A':
+                        st.metric(
+                            label="Free Space", 
+                            value=f"{drive['free_gb']} GB",
+                            help=f"Device: {drive['device']}"
+                        )
+                    else:
+                        st.caption("N/A")
+                
+                # Add separator between drives
+                if i < len(drives) - 1:
+                    st.divider()
+        
+        # Summary info
+        accessible_drives = [d for d in drives if 'error' not in d]
+        st.info(f"📊 **Summary:** {len(accessible_drives)} accessible drives out of {len(drives)} total drives detected")
+        
+        return drives
 
     def initialize_agent(self, api_key: str, root_dir: str) -> bool:
         """Initialize the file search agent."""
@@ -175,6 +267,9 @@ class StreamlitApp:
         
         # Display welcome message for new users
         MainUI.display_welcome_message()
+        
+        # Display available drives section
+        self.display_drives_section()
         
         # Chat history with modern styling
         chat_placeholder = st.empty()

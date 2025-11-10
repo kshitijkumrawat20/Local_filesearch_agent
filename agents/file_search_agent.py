@@ -13,7 +13,10 @@ import psutil
 from tools.file_tools import get_file_tools
 from utils.state_manager import AgentState, StateManager
 from config.settings import get_llm_config
-
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings   
+from dotenv import load_dotenv
+load_dotenv()
 
 class FileSearchAgent:
     """AI agent for searching and managing files on Windows systems."""
@@ -27,6 +30,7 @@ class FileSearchAgent:
         self.memory = MemorySaver()
         self.graph = self._build_graph()
         self.state_manager = StateManager()
+
     
     def _initialize_llm(self) -> ChatGroq:
         """Initialize the language model."""
@@ -37,17 +41,17 @@ class FileSearchAgent:
         #     temperature=config["temperature"]
         # )
 
-        # return ChatOpenAI(
-        #     model=config["model"],
-        #     # temperature=0,
-        #     # max_retries=2,
-        #     api_key=self.api_key
-        # )
-        llm = ChatOllama(
-            model="granite4:latest",
-            temperature=0,
-            # other params...
+        return ChatOpenAI(
+            model=config["model"],
+            # temperature=0,
+            # max_retries=2,
+            api_key=self.api_key
         )
+        # llm = ChatOllama(
+        #     model="granite4:latest",
+        #     temperature=0,
+        #     # other params...
+        # )
     
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
