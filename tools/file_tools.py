@@ -16,7 +16,23 @@ import requests
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import UnstructuredPowerPointLoader
-from utils.sementic_search_engine import Detect_and_Create_file_VStore
+from utils.sementic_search_engine import Detect_and_Create_file_VStore, get_cached_hf_embeddings, clear_global_hf_cache
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Add HuggingFace embeddings support
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+    HF_EMBEDDINGS_AVAILABLE = True
+except ImportError:
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        HF_EMBEDDINGS_AVAILABLE = True
+    except ImportError:
+        HF_EMBEDDINGS_AVAILABLE = False
+        print("[WARNING] HuggingFace embeddings not available. Install: pip install sentence-transformers")
 
 # Add pandas and openpyxl for Excel handling
 try:
@@ -30,25 +46,58 @@ except ImportError:
 class FileTools:
     """Wrapper class for file management tools."""
     
-    def __init__(self, root_dir: str = "C:\\"):
+    def __init__(self, root_dir: str = "C:\\", use_hf_embeddings: bool = True):
         self.root_dir = root_dir
+        self.use_hf_embeddings = use_hf_embeddings
         self.shell_tool = ShellTool()
         self.toolkit = FileManagementToolkit(root_dir=self.root_dir)
         self.file_management_tools = self.toolkit.get_tools()
         self.vectorstore = self.get_vectorstore()
 
+    def get_hf_embeddings(self):
+        """Get HuggingFace embeddings model with global caching."""
+        return get_cached_hf_embeddings()
+    
+    @classmethod
+    def clear_hf_cache(cls):
+        """Clear the cached HuggingFace embeddings model."""
+        clear_global_hf_cache()
+    
+    @classmethod
+    def get_cache_info(cls):
+        """Get information about the cached model."""
+        from utils.sementic_search_engine import _GLOBAL_HF_MODEL_NAME, _GLOBAL_HF_EMBEDDINGS_CACHE
+        
+        cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "local_filesearch_agent")
+        cache_exists = os.path.exists(cache_dir)
+        model_cached = _GLOBAL_HF_EMBEDDINGS_CACHE is not None
+        
+        return {
+            "model_name": _GLOBAL_HF_MODEL_NAME,
+            "cache_directory": cache_dir,
+            "cache_directory_exists": cache_exists,
+            "model_in_memory": model_cached
+        }
+
     def get_vectorstore(self):
         try:
-            # Check if the database actually has content
-            embeddings = OpenAIEmbeddings()
-            vs = Chroma(collection_name="paths", embedding_function=embeddings, persist_directory="./chroma_db")
+            # Choose embedding based on configuration
+            if self.use_hf_embeddings and HF_EMBEDDINGS_AVAILABLE:
+                embeddings = self.get_hf_embeddings()
+                print("[VERBOSE] Using HuggingFace embeddings")
+            else:
+                embeddings = OpenAIEmbeddings()
+                print("[VERBOSE] Using OpenAI embeddings")
             
-            # Verify the vectorstore has content by trying to get count
+            vs = Chroma(
+                collection_name="paths", 
+                embedding_function=embeddings, 
+                persist_directory="./chroma_db"
+            )
+            
+            # Verify the vectorstore has content
             try:
-                # Try to get a sample of documents to verify database has content
-                sample_docs = vs.similarity_search("test", k=1)
                 collection_count = vs._collection.count()
-                
                 if collection_count == 0:
                     print("[VERBOSE] Chroma DB exists but is empty, rebuilding...")
                     raise Exception("Empty vectorstore detected")
@@ -62,15 +111,14 @@ class FileTools:
                 
         except Exception as e:
             print(f"[VERBOSE] Chroma DB not found or corrupted, creating new vector store: {str(e)}")
-            detector = Detect_and_Create_file_VStore()
             
-            # Start background updates for continuous indexing
+            # Use HuggingFace embeddings for the detector as well
+            detector = Detect_and_Create_file_VStore(use_hf_embeddings=self.use_hf_embeddings)
+            
             vs = detector.run_pipeline()
             detector.start_background_updates()
             
-            # Store detector instance for future updates
             self.detector = detector
-            
             return vs
     
     def get_all_tools(self) -> List:
