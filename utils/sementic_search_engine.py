@@ -254,7 +254,7 @@ class Detect_and_Create_file_VStore:
         """Run the indexing pipeline - full or incremental based on existing data."""
         # default to all mounted partitions' mountpoints
         if root_dirs is None:
-            root_dirs = [p.mountpoint for p in psutil.disk_partitions()]
+            root_dirs = [p.mountpoint for p in psutil.disk_partitions(all=True)]
         
         # Check if we need a full rebuild
         need_full_rebuild = (force_full_rebuild or 
@@ -288,7 +288,7 @@ class Detect_and_Create_file_VStore:
     def run_incremental_update(self, root_dirs=None):
         """Run incremental update - only scan for new/modified files."""
         if root_dirs is None:
-            root_dirs = [p.mountpoint for p in psutil.disk_partitions()]
+            root_dirs = [p.mountpoint for p in psutil.disk_partitions(all=True)]
         
         # Remove deleted files first
         self.remove_deleted_files_from_vectorstore()

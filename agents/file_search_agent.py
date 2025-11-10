@@ -90,7 +90,7 @@ class FileSearchAgent:
     def get_system_prompt(self) -> str:
         """Get the system prompt for the agent."""
         result = ""
-        for disk in psutil.disk_partitions():
+        for disk in psutil.disk_partitions(all = True):
             result += disk.device + ";"
 
         return """You are a helpful assistant designed to search files and folders on a Windows system with Network Attached Storage(NAS). You are optimized for finding files of types like PDF, DOCX, XLSX, and images, and querying their content.

@@ -50,9 +50,10 @@ class StreamlitApp:
         """Get list of available drives with details."""
         drives = []
         try:
-            for partition in psutil.disk_partitions():
+            for partition in psutil.disk_partitions(all = True):
                 try:
                     usage = psutil.disk_usage(partition.mountpoint)
+                    
                     # Convert bytes to GB
                     total_gb = round(usage.total / (1024**3), 2)
                     used_gb = round(usage.used / (1024**3), 2)
