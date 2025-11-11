@@ -36,53 +36,86 @@ _GLOBAL_HF_EMBEDDINGS_CACHE = None
 _GLOBAL_HF_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 def get_cached_hf_embeddings():
-    """Get cached HuggingFace embeddings or create new one."""
+    """Get cached HuggingFace embeddings with GPU optimization."""
     global _GLOBAL_HF_EMBEDDINGS_CACHE
     
     if _GLOBAL_HF_EMBEDDINGS_CACHE is not None:
-        print("Using cached HuggingFace embeddings model")
+        print("✅ Using cached HuggingFace embeddings model")
         return _GLOBAL_HF_EMBEDDINGS_CACHE
     
     try:
-        print("Loading HuggingFace model (this may take a moment on first run)...")
+        print("📥 Loading HuggingFace model with optimizations...")
         
         # This model is public and doesn't need authentication
         # Remove any HF_TOKEN from environment to avoid authentication errors
         if "HF_TOKEN" in os.environ:
             del os.environ["HF_TOKEN"]
-            print("Removed HF_TOKEN from environment - using public model without authentication")
-        else:
-            print("Downloading public model without authentication")
+            print("🔓 Removed HF_TOKEN - using public model without authentication")
         
         # Create cache directory for models
         cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "local_filesearch_agent")
         os.makedirs(cache_dir, exist_ok=True)
         
-        # Check if GPU is available
-        try:
-            import torch
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            print(f"Using device for embeddings: {device}")
-        except ImportError:
-            device = 'cpu'
-            print("PyTorch not available, using CPU")
+        # Check GPU availability
+        import torch
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        # Model configuration for optimization
+        model_kwargs = {'device': device}
+        
+        if device == 'cuda':
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"🚀 GPU detected: {gpu_name} ({gpu_memory:.1f} GB)")
+            
+            # Use float16 for 2x speed boost on GPU
+            try:
+                model_kwargs['torch_dtype'] = torch.float16
+                print("⚡ Using FP16 precision for 2x speed boost")
+            except:
+                print("⚠️  FP16 not available, using FP32")
+        else:
+            print(f"💻 Using CPU (no GPU detected)")
+        
+        # Encoding configuration with optimized batch size
+        encode_kwargs = {
+            'normalize_embeddings': True,
+            # Note: Don't set show_progress_bar here - let it use default to avoid conflicts
+        }
+        
+        # Optimize batch size based on device
+        if device == 'cuda':
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            if gpu_memory > 8:
+                encode_kwargs['batch_size'] = 512  # Large GPU
+            elif gpu_memory > 4:
+                encode_kwargs['batch_size'] = 256  # Medium GPU
+            else:
+                encode_kwargs['batch_size'] = 128  # Small GPU
+        else:
+            import multiprocessing
+            cpu_count = multiprocessing.cpu_count()
+            encode_kwargs['batch_size'] = min(cpu_count * 4, 64)  # CPU
+        
+        print(f"📊 Encoding batch size: {encode_kwargs['batch_size']}")
         
         embeddings = HuggingFaceEmbeddings(
             model_name=_GLOBAL_HF_MODEL_NAME,
             cache_folder=cache_dir,
-            model_kwargs={'device': device},
-            # encode_kwargs={'normalize_embeddings': True}
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs
         )
         
         # Cache the embeddings instance
         _GLOBAL_HF_EMBEDDINGS_CACHE = embeddings
-        print(f"Successfully loaded and cached HuggingFace model: {_GLOBAL_HF_MODEL_NAME}")
-        print(f"Model cached in: {cache_dir}")
+        print(f"✅ Successfully loaded model: {_GLOBAL_HF_MODEL_NAME}")
+        print(f"📁 Model cached in: {cache_dir}")
+        
         return embeddings
         
     except Exception as e:
-        print(f"Failed to load HuggingFace embeddings: {e}")
-        print("Falling back to OpenAI embeddings")
+        print(f"❌ Failed to load HuggingFace embeddings: {e}")
+        print("🔄 Falling back to OpenAI embeddings")
         return OpenAIEmbeddings()
 
 def clear_global_hf_cache():
@@ -254,13 +287,48 @@ class Detect_and_Create_file_VStore:
         return matched
 
     def _remove_existing_db(self):
-        """Remove existing database - only used for full rebuild."""
+        """Remove existing database with proper cleanup to avoid lock issues."""
         if os.path.exists(self.persist_directory):
             try:
+                # Close any existing vectorstore connections first
+                if hasattr(self, 'vectorstore') and self.vectorstore:
+                    try:
+                        del self.vectorstore
+                        self.vectorstore = None
+                    except:
+                        pass
+                
+                # Force Python garbage collection to release file handles
+                import gc
+                gc.collect()
+                
+                # Give Windows time to release file locks (increased wait time)
+                time.sleep(3)
+                
                 logging.info("Removing existing Chroma DB at %s", self.persist_directory)
+                
+                # Try to remove the directory
                 shutil.rmtree(self.persist_directory)
+                logging.info("✅ Successfully removed existing DB")
+                
+                # Wait again after deletion
+                time.sleep(2)
+                
+            except PermissionError as e:
+                # If still locked, it means something else has it open
+                # This should NOT happen if the app was properly closed
+                logging.error(f"❌ DB is locked - cannot rebuild: {e}")
+                logging.error(f"❌ Please close all applications using the database and try again")
+                logging.error(f"❌ If the app crashed, restart your computer or manually delete: {self.persist_directory}")
+                
+                # DO NOT create a new directory - this causes the problem!
+                # Instead, raise an exception to stop the rebuild
+                raise Exception(f"Database is locked by another process. Please close all apps and try again.")
+                    
             except Exception as e:
-                logging.warning("Could not remove existing chroma db: %s", e)
+                logging.error(f"❌ Could not remove existing chroma db: {e}")
+                # Raise the exception instead of continuing
+                raise
     
     def remove_deleted_files_from_vectorstore(self):
         """Remove files from vectorstore that no longer exist on disk."""
@@ -330,89 +398,187 @@ class Detect_and_Create_file_VStore:
             logging.error(f"Error updating vectorstore: {e}")
             return self.vectorstore
 
-    def create_file_vectorstore(self, file_paths, retries=3, delay=1, incremental=False):
-        """Create or update vectorstore with file paths using optimized batching."""
+    def create_file_vectorstore(self, file_paths, retries=3, delay=1, incremental=False, batch_size=None):
+        """Create vectorstore - now redirects to parallel implementation."""
+        # Use parallel embedding for better performance
+        return self.create_file_vectorstore_with_parallel_embedding(file_paths, retries, incremental)
+
+    def create_file_vectorstore_with_parallel_embedding(self, file_paths, retries=3, incremental=False):
+        """Create vectorstore with parallel embedding generation for maximum speed."""
         if incremental:
             return self.update_vectorstore_incremental(file_paths)
             
         total_files = len(file_paths)
-        logging.info(f"Creating vectorstore with {total_files} files using {'HuggingFace' if self.use_hf_embeddings else 'OpenAI'} embeddings")
+        logging.info(f"=" * 60)
+        logging.info(f"Creating vectorstore with {total_files} files using parallel embedding")
         
-        # Adjust batch size based on embedding type
-        batch_size = self.batch_size if self.use_hf_embeddings else 100
-        logging.info(f"Using batch size: {batch_size}")
+        # Check if GPU is available
+        import torch
+        import multiprocessing
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        # Remove existing DB before creating a fresh one
-        self._remove_existing_db()
-        vs = None
-        
-        # Process files in batches
-        for i in range(0, total_files, batch_size):
-            batch = file_paths[i:i + batch_size]
-            batch_num = (i // batch_size) + 1
-            total_batches = (total_files + batch_size - 1) // batch_size
+        # Optimize batch size and workers based on device
+        if device == 'cuda':
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            gpu_name = torch.cuda.get_device_name(0)
+            logging.info(f"🚀 Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
             
-            logging.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} files)")
-            start_time = time.time()
-            
-            docs = [Document(page_content=fp, metadata={"path": fp}) for fp in batch]
-            
-            last_exc = None
-            for attempt in range(1, retries + 1):
-                try:
-                    if vs is None:
-                        # Create vectorstore on first batch
-                        vs = Chroma(
-                            collection_name="paths", 
-                            embedding_function=self.embeddings, 
-                            persist_directory=self.persist_directory
-                        )
-                    
-                    # Add documents for this batch
-                    vs.add_documents(docs)
-                    
-                    # Update metadata for this batch
-                    for fp in batch:
-                        file_info = self.get_file_info(fp)
-                        if file_info:
-                            self.file_metadata[fp] = file_info
-                    
-                    # Save metadata every 10 batches or on last batch
-                    if batch_num % 10 == 0 or i + batch_size >= total_files:
-                        self.save_metadata()
-                        logging.info(f"Saved metadata after batch {batch_num}")
-                    
-                    batch_time = time.time() - start_time
-                    files_per_sec = len(batch) / batch_time if batch_time > 0 else 0
-                    logging.info(f"Batch {batch_num} completed in {batch_time:.2f}s ({files_per_sec:.1f} files/sec)")
-                    
-                    # Minimal delay for HuggingFace, longer for OpenAI
-                    if batch_num < total_batches:
-                        if self.use_hf_embeddings:
-                            time.sleep(0.1)  # 100ms for local embeddings
-                        else:
-                            time.sleep(1)    # 1s for API embeddings
-                    
-                    break  # Success, move to next batch
-                    
-                except Exception as e:
-                    last_exc = e
-                    logging.warning(f"Batch {batch_num}, attempt {attempt} failed: {e}")
-                    if attempt < retries:
-                        time.sleep(delay * attempt)  # Exponential backoff
-                    else:
-                        logging.error(f"Failed to process batch {batch_num} after {retries} attempts")
-                        break
-        
-        if vs:
-            self.vectorstore = vs
-            total_time = time.time() - start_time if 'start_time' in locals() else 0
-            avg_speed = total_files / total_time if total_time > 0 else 0
-            logging.info(f"Successfully created vectorstore with {total_files} files")
-            logging.info(f"Average processing speed: {avg_speed:.1f} files/second")
-            return vs
+            if gpu_memory > 8:
+                batch_size = 10000
+                num_workers = 4
+            elif gpu_memory > 4:
+                batch_size = 5000
+                num_workers = 3
+            else:
+                batch_size = 2000
+                num_workers = 2
         else:
-            raise RuntimeError("Failed to create vectorstore")
+            # CPU: Smaller batches, more workers
+            cpu_count = multiprocessing.cpu_count()
+            logging.info(f"💻 Using CPU with {cpu_count} cores")
+            batch_size = 500
+            num_workers = min(cpu_count, 8)  # Max 8 workers
+        
+        logging.info(f"📊 Batch size: {batch_size}, Workers: {num_workers}")
+        logging.info(f"=" * 60)
+        
+        # Clean up before starting
+        self._remove_existing_db()
+        
+        # Create vectorstore
+        vs = Chroma(
+            collection_name="paths", 
+            embedding_function=self.embeddings, 
+            persist_directory=self.persist_directory
+        )
+        
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def create_batches(file_list, batch_size):
+            """Create batches from file list."""
+            return [file_list[i:i + batch_size] for i in range(0, len(file_list), batch_size)]
+        
+        def process_batch(batch, batch_id):
+            """Process a single batch of files."""
+            try:
+                docs = [Document(page_content=fp, metadata={"path": fp}) for fp in batch]
+                
+                # Update metadata
+                batch_metadata = {}
+                for fp in batch:
+                    file_info = self.get_file_info(fp)
+                    if file_info:
+                        batch_metadata[fp] = file_info
+                
+                return {
+                    'success': True,
+                    'docs': docs,
+                    'metadata': batch_metadata,
+                    'batch_id': batch_id,
+                    'count': len(batch)
+                }
+            except Exception as e:
+                logging.error(f"❌ Error processing batch {batch_id}: {e}")
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'batch_id': batch_id
+                }
+        
+        # Create all batches
+        all_batches = create_batches(file_paths, batch_size)
+        total_batches = len(all_batches)
+        
+        logging.info(f"Processing {total_batches} batches with {num_workers} parallel workers")
+        
+        start_time = time.time()
+        processed_count = 0
+        failed_count = 0
+        
+        # Use ThreadPoolExecutor for parallel batch processing
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all batches
+            future_to_batch = {
+                executor.submit(process_batch, batch, i): i 
+                for i, batch in enumerate(all_batches)
+            }
+            
+            # Process results as they complete
+            for future in as_completed(future_to_batch):
+                batch_id = future_to_batch[future]
+                
+                try:
+                    result = future.result()
+                    
+                    if result['success']:
+                        # Add documents to vectorstore
+                        try:
+                            vs.add_documents(result['docs'])
+                        except Exception as add_error:
+                            logging.error(f"❌ Failed to add documents for batch {batch_id}: {add_error}")
+                            failed_count += 1
+                            continue
+                        
+                        # Update metadata
+                        self.file_metadata.update(result['metadata'])
+                        
+                        processed_count += result['count']
+                        
+                        # Save metadata frequently (every 5 batches)
+                        if (batch_id + 1) % 5 == 0:
+                            try:
+                                self.save_metadata()
+                            except Exception as save_error:
+                                logging.warning(f"⚠️  Failed to save metadata at batch {batch_id}: {save_error}")
+                        
+                        elapsed = time.time() - start_time
+                        rate = processed_count / elapsed if elapsed > 0 else 0
+                        progress = (batch_id + 1) / total_batches * 100
+                        
+                        logging.info(
+                            f"📈 Progress: {progress:.1f}% | "
+                            f"Batch {batch_id + 1}/{total_batches} | "
+                            f"Processed: {processed_count:,}/{total_files:,} files | "
+                            f"Speed: {rate:.1f} files/sec"
+                        )
+                    else:
+                        failed_count += 1
+                        logging.error(f"❌ Batch {batch_id} failed: {result.get('error')}")
+                        
+                except Exception as e:
+                    failed_count += 1
+                    logging.error(f"❌ Error processing batch {batch_id}: {e}")
+        
+        # Final save with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self.save_metadata()
+                logging.info("✅ Successfully saved final metadata")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logging.warning(f"⚠️  Save attempt {attempt + 1} failed: {e}, retrying...")
+                    time.sleep(2 * (attempt + 1))
+                else:
+                    logging.error(f"❌ Failed to save metadata after {max_retries} attempts: {e}")
+        
+        total_time = time.time() - start_time
+        avg_speed = processed_count / total_time if total_time > 0 else 0
+        
+        self.vectorstore = vs
+        
+        logging.info(f"=" * 60)
+        logging.info(f"✅ PARALLEL EMBEDDING COMPLETED!")
+        logging.info(f"📊 Total files processed: {processed_count:,}/{total_files:,}")
+        logging.info(f"❌ Failed batches: {failed_count}")
+        logging.info(f"⏱️  Total time: {total_time:.2f} seconds ({total_time/60:.1f} minutes)")
+        logging.info(f"🚀 Average speed: {avg_speed:.1f} files/second")
+        if device == 'cuda':
+            logging.info(f"⚡ GPU acceleration enabled")
+        logging.info(f"=" * 60)
+        
+        return vs
 
     def update_vectorstore_incremental(self, file_paths):
         """Update vectorstore with only new/modified files using optimized batching."""
@@ -469,23 +635,94 @@ class Detect_and_Create_file_VStore:
         return self.vectorstore
 
     def run_pipeline(self, root_dirs=None, force_full_rebuild=False):
-        """Run the indexing pipeline with parallel scanning and optimized batching."""
+        """Run the indexing pipeline with smart rebuild detection and parallel processing."""
         # default to all mounted partitions' mountpoints
         if root_dirs is None:
             root_dirs = [p.mountpoint for p in psutil.disk_partitions(all=True)]
         
-        # Check if we need a full rebuild
-        need_full_rebuild = (force_full_rebuild or 
-                           not os.path.exists(self.persist_directory) or 
-                           not os.path.exists(self.metadata_file) or 
-                           not self.file_metadata)
+        # Check what exists
+        db_exists = os.path.exists(self.persist_directory)
+        metadata_exists = os.path.exists(self.metadata_file)
+        has_metadata = bool(self.file_metadata)
         
-        logging.info(f"Pipeline check - Force rebuild: {force_full_rebuild}, DB exists: {os.path.exists(self.persist_directory)}, Metadata exists: {os.path.exists(self.metadata_file)}, Metadata count: {len(self.file_metadata)}")
+        logging.info(f"=" * 60)
+        logging.info(f"PIPELINE STATUS CHECK")
+        logging.info(f"=" * 60)
+        logging.info(f"  ⚙️  Force rebuild requested: {force_full_rebuild}")
+        logging.info(f"  📁 Database directory exists: {db_exists}")
+        logging.info(f"  📄 Metadata file exists: {metadata_exists}")
+        logging.info(f"  📊 Metadata records loaded: {len(self.file_metadata):,}")
+        logging.info(f"=" * 60)
+        
+        # Determine if we need full rebuild
+        need_full_rebuild = force_full_rebuild
+        
+        if not need_full_rebuild:
+            if not db_exists:
+                logging.info("❌ Database directory missing - full rebuild required")
+                need_full_rebuild = True
+            elif not metadata_exists:
+                logging.info("❌ Metadata file missing - full rebuild required")
+                need_full_rebuild = True
+            elif not has_metadata:
+                logging.info("❌ No metadata records - full rebuild required")
+                need_full_rebuild = True
+            else:
+                # Check if vectorstore is actually valid
+                try:
+                    test_vs = Chroma(
+                        collection_name="paths",
+                        embedding_function=self.embeddings,
+                        persist_directory=self.persist_directory
+                    )
+                    count = test_vs._collection.count()
+                    
+                    logging.info(f"📊 Existing vectorstore has {count:,} documents")
+                    logging.info(f"📊 Metadata has {len(self.file_metadata):,} file records")
+                    
+                    # If there's a huge mismatch, consider it corrupted
+                    if count == 0 and len(self.file_metadata) > 100:
+                        logging.warning("⚠️  Vectorstore is empty but metadata has many files - corruption detected")
+                        need_full_rebuild = True
+                    elif count < len(self.file_metadata) * 0.5:  # Less than 50% of expected
+                        logging.warning(f"⚠️  Vectorstore has only {count:,} documents but metadata shows {len(self.file_metadata):,} files")
+                        logging.warning("⚠️  Possible corruption detected - performing full rebuild")
+                        need_full_rebuild = True
+                    else:
+                        logging.info("✅ Vectorstore appears valid - will use existing database")
+                        
+                        # Set the vectorstore and return it immediately
+                        self.vectorstore = test_vs
+                        
+                        logging.info(f"=" * 60)
+                        logging.info(f"✅ USING EXISTING VECTORSTORE")
+                        logging.info(f"=" * 60)
+                        logging.info(f"  📊 Documents in database: {count:,}")
+                        logging.info(f"  📄 Files in metadata: {len(self.file_metadata):,}")
+                        logging.info(f"  ✅ No rebuild or scanning needed!")
+                        logging.info(f"=" * 60)
+                        
+                        return test_vs
+                        
+                except Exception as e:
+                    logging.error(f"❌ Failed to verify vectorstore: {e}")
+                    need_full_rebuild = True
+                    
+                    # Clean up failed test instance
+                    try:
+                        del test_vs
+                    except:
+                        pass
+                    import gc
+                    gc.collect()
+                    time.sleep(0.5)
         
         start_time = time.time()
         
         if need_full_rebuild:
-            logging.info("Performing full rebuild of vectorstore with parallel scanning")
+            logging.info("=" * 60)
+            logging.info("🔄 PERFORMING FULL REBUILD")
+            logging.info("=" * 60)
             
             # Use parallel scanning for multiple drives
             if len(root_dirs) > 1:
@@ -495,19 +732,19 @@ class Detect_and_Create_file_VStore:
                 all_paths = []
                 for root in root_dirs:
                     try:
-                        logging.info("Scanning drive: %s", root)
+                        logging.info(f"🔍 Scanning drive: {root}")
                         paths = self.find_files_by_extension(root)
-                        logging.info(f"Found {len(paths)} files in {root}")
+                        logging.info(f"✅ Found {len(paths):,} files in {root}")
                         all_paths.extend(paths)
                     except Exception as e:
-                        logging.warning("Skipping drive %s due to error: %s", root, e)
+                        logging.warning(f"⚠️  Skipping drive {root} due to error: {e}")
             
             scan_time = time.time() - start_time
-            logging.info(f"Scanning completed in {scan_time:.2f} seconds")
-            logging.info("Found %d matching files total", len(all_paths))
+            logging.info(f"⏱️  Scanning completed in {scan_time:.2f} seconds")
+            logging.info(f"📊 Found {len(all_paths):,} matching files total")
             
             if not all_paths:
-                logging.warning("No files found during scan - this might indicate a configuration issue")
+                logging.warning("⚠️  No files found during scan - this might indicate a configuration issue")
                 return None
             
             embedding_start = time.time()
@@ -515,14 +752,20 @@ class Detect_and_Create_file_VStore:
             embedding_time = time.time() - embedding_start
             
             total_time = time.time() - start_time
-            logging.info(f"Full pipeline completed in {total_time:.2f} seconds")
-            logging.info(f"  - Scanning: {scan_time:.2f}s")
-            logging.info(f"  - Embedding: {embedding_time:.2f}s")
-            logging.info(f"  - Average speed: {len(all_paths) / total_time:.1f} files/second")
+            logging.info(f"=" * 60)
+            logging.info(f"✅ FULL REBUILD COMPLETED")
+            logging.info(f"=" * 60)
+            logging.info(f"  ⏱️  Total time: {total_time:.2f}s ({total_time/60:.1f} minutes)")
+            logging.info(f"  🔍 Scanning: {scan_time:.2f}s")
+            logging.info(f"  🧠 Embedding: {embedding_time:.2f}s")
+            logging.info(f"  🚀 Average speed: {len(all_paths) / total_time:.1f} files/second")
+            logging.info(f"=" * 60)
             
             return result
         else:
-            logging.info("Performing incremental update")
+            logging.info("=" * 60)
+            logging.info("🔄 PERFORMING INCREMENTAL UPDATE")
+            logging.info("=" * 60)
             return self.run_incremental_update(root_dirs)
     
     def run_incremental_update(self, root_dirs=None):

@@ -80,6 +80,9 @@ class FileTools:
         }
 
     def get_vectorstore(self):
+        """Get or create vectorstore with proper cleanup to avoid lock issues."""
+        chroma_instance = None
+        
         try:
             # Choose embedding based on configuration
             if self.use_hf_embeddings and HF_EMBEDDINGS_AVAILABLE:
@@ -89,32 +92,96 @@ class FileTools:
                 embeddings = OpenAIEmbeddings()
                 print("[VERBOSE] Using OpenAI embeddings")
             
-            vs = Chroma(
-                collection_name="paths", 
-                embedding_function=embeddings, 
-                persist_directory="./chroma_db"
-            )
+            # Check if database directory and metadata exist
+            db_exists = os.path.exists("./chroma_db")
+            metadata_exists = os.path.exists("./file_metadata.json")
             
-            # Verify the vectorstore has content
-            try:
-                collection_count = vs._collection.count()
-                if collection_count == 0:
-                    print("[VERBOSE] Chroma DB exists but is empty, rebuilding...")
-                    raise Exception("Empty vectorstore detected")
-                
-                print(f"[VERBOSE] Loaded existing vectorstore with {collection_count} documents")
-                return vs
-                
-            except Exception as count_error:
-                print(f"[VERBOSE] Vectorstore verification failed: {str(count_error)}")
-                raise count_error
+            print(f"[VERBOSE] Database check - DB exists: {db_exists}, Metadata exists: {metadata_exists}")
+            
+            # Only try to open if both exist
+            if db_exists and metadata_exists:
+                try:
+                    # Try to open existing vectorstore
+                    chroma_instance = Chroma(
+                        collection_name="paths", 
+                        embedding_function=embeddings, 
+                        persist_directory="./chroma_db"
+                    )
+                    
+                    # Verify the vectorstore has content
+                    collection_count = chroma_instance._collection.count()
+                    
+                    print(f"[VERBOSE] Existing vectorstore found with {collection_count:,} documents")
+                    
+                    # Only rebuild if truly empty (less than 10 documents is suspicious)
+                    if collection_count < 10:
+                        print("[VERBOSE] Vectorstore has very few documents, checking metadata...")
+                        
+                        # Check metadata to decide
+                        try:
+                            with open("./file_metadata.json", 'r') as f:
+                                import json
+                                metadata = json.load(f)
+                                metadata_count = len(metadata)
+                            
+                            print(f"[VERBOSE] Metadata shows {metadata_count:,} files should be indexed")
+                            
+                            # If metadata has many files but vectorstore is empty, it's corrupted
+                            if metadata_count > 100 and collection_count < 10:
+                                print("[WARNING] Vectorstore appears corrupted (metadata mismatch)")
+                                raise Exception("Corrupted vectorstore - metadata mismatch")
+                            elif collection_count == 0:
+                                print("[WARNING] Vectorstore is completely empty")
+                                raise Exception("Empty vectorstore")
+                        except FileNotFoundError:
+                            print("[WARNING] Metadata file not found")
+                            raise Exception("Missing metadata file")
+                    
+                    # Vectorstore is valid and has content - just return it!
+                    print(f"[OK] ✅ Using existing vectorstore with {collection_count:,} documents")
+                    print(f"[OK] 🚀 No rebuild needed - vectorstore is ready!")
+                    self.vectorstore = chroma_instance
+                    return chroma_instance
+                    
+                except Exception as verify_error:
+                    print(f"[VERBOSE] Vectorstore verification failed: {str(verify_error)}")
+                    
+                    # Close this instance before rebuilding
+                    if chroma_instance:
+                        del chroma_instance
+                        chroma_instance = None
+                    
+                    # Force cleanup
+                    import gc
+                    gc.collect()
+                    import time
+                    time.sleep(1)
+                    
+                    # Re-raise to trigger rebuild
+                    raise verify_error
+            else:
+                print("[VERBOSE] Database or metadata missing - need to create new vectorstore")
+                raise Exception("Database files not found")
                 
         except Exception as e:
-            print(f"[VERBOSE] Chroma DB not found or corrupted, creating new vector store: {str(e)}")
+            print(f"[VERBOSE] Need to create/rebuild vectorstore: {str(e)}")
             
-            # Use HuggingFace embeddings for the detector as well
+            # Make sure any open instance is closed
+            if chroma_instance:
+                del chroma_instance
+                chroma_instance = None
+            
+            # Force cleanup
+            import gc
+            import time
+            gc.collect()
+            time.sleep(1)
+            
+            # Now create the detector and run pipeline
+            print("[VERBOSE] Creating new vectorstore with file detector...")
             detector = Detect_and_Create_file_VStore(use_hf_embeddings=self.use_hf_embeddings)
             
+            # The detector will handle whether to do full rebuild or incremental
             vs = detector.run_pipeline()
             detector.start_background_updates()
             
