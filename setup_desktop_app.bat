@@ -121,23 +121,33 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo Step 5: Starting FastAPI backend server...
-echo ----------------------------------------
+echo Step 5: Configuring auto-start backend...
+echo ------------------------------------------
 
-echo Starting backend server in background...
+echo Creating silent background launcher...
 
-REM Create a startup script for the backend
+REM Create silent launcher VBS script that runs without showing window
 (
-echo @echo off
-echo cd /d "%INSTALL_DIR%"
-echo call .venv\Scripts\activate
-echo start /B python -m uvicorn api_server:app --host 127.0.0.1 --port 8765
-) > START_BACKEND.bat
+echo Set WshShell = CreateObject^("WScript.Shell"^)
+echo WshShell.CurrentDirectory = "%INSTALL_DIR%"
+echo WshShell.Run """%INSTALL_DIR%\.venv\Scripts\python.exe"" -m uvicorn api_server:app --host 127.0.0.1 --port 8765", 0, False
+) > "%INSTALL_DIR%\start_backend_silent.vbs"
 
-REM Start the backend in background
-start "" /B cmd /c "cd /d "%INSTALL_DIR%" && call .venv\Scripts\activate && python -m uvicorn api_server:app --host 127.0.0.1 --port 8765"
+REM Copy to Windows Startup folder for auto-start on every login
+set STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
+echo Adding to Windows Startup folder...
+copy "%INSTALL_DIR%\start_backend_silent.vbs" "%STARTUP_DIR%\LocalFileSearchAPI.vbs" >nul
+if %ERRORLEVEL% EQU 0 (
+    echo Backend configured to auto-start on login!
+) else (
+    echo WARNING: Could not add to startup folder
+)
 
-echo Waiting for backend to start...
+REM Start backend now (silently in background, no window)
+echo Starting FastAPI backend now...
+wscript //nologo "%INSTALL_DIR%\start_backend_silent.vbs"
+
+echo Waiting for backend to initialize...
 timeout /t 5 /nobreak >nul
 
 REM Check if backend is running
