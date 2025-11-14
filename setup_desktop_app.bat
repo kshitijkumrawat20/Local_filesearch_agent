@@ -1,5 +1,4 @@
 @echo off
-setlocal EnableDelayedExpansion
 echo.
 echo ============================================================
 echo   Local File Search Agent - Complete Desktop App Setup
@@ -8,9 +7,9 @@ echo ============================================================
 echo.
 
 REM Set variables
-set INSTALL_DIR=%CD%
-set NODE_VERSION=20.11.0
-set NODE_INSTALLER=%TEMP%\node-installer.msi
+set INSTALL_DIR=%CD%\Local_filesearch_agent
+set REPO_URL=https://github.com/kshitijkumrawat20/Local_filesearch_agent/archive/refs/heads/main.zip
+set ZIP_FILE=%TEMP%\Local_filesearch_agent.zip
 
 echo Step 1: Installing uv package manager...
 echo ----------------------------------------
@@ -19,8 +18,7 @@ REM Check if uv is already installed
 uv --version >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     echo uv is already installed
-    uv --version
-    goto :check_node
+    goto :download_repo
 )
 
 echo Installing uv...
@@ -31,53 +29,41 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-REM Refresh PATH using PowerShell
-for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set "UserPath=%%b"
-for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do set "SystemPath=%%b"
-set "PATH=%UserPath%;%SystemPath%"
+REM Refresh PATH
+call refreshenv
 
-:check_node
+:download_repo
 echo.
-echo Step 2: Checking Node.js installation...
-echo ----------------------------------------
+echo Step 2: Downloading repository from GitHub...
+echo ---------------------------------
 
-node --version >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    echo Node.js is already installed
-    node --version
-    npm --version
-    goto :setup_python_env
+REM Remove existing directory
+if exist "%INSTALL_DIR%" (
+    echo Removing existing directory...
+    rmdir /s /q "%INSTALL_DIR%"
 )
 
-echo Node.js not found. Installing Node.js %NODE_VERSION%...
-echo Downloading Node.js installer...
-
-powershell -Command "Invoke-WebRequest -Uri 'https://nodejs.org/dist/v%NODE_VERSION%/node-v%NODE_VERSION%-x64.msi' -OutFile '%NODE_INSTALLER%' -UseBasicParsing"
+REM Download repository
+echo Downloading from GitHub...
+powershell -Command "Invoke-WebRequest -Uri '%REPO_URL%' -OutFile '%ZIP_FILE%' -UseBasicParsing"
 if %ERRORLEVEL% NEQ 0 (
-    echo Failed to download Node.js installer
+    echo Failed to download repository
     pause
     exit /b 1
 )
 
-echo Installing Node.js (this may take a few minutes)...
-msiexec /i "%NODE_INSTALLER%" /qn /norestart
+REM Extract repository
+echo Extracting archive...
+powershell -Command "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%TEMP%' -Force"
 if %ERRORLEVEL% NEQ 0 (
-    echo Failed to install Node.js
+    echo Failed to extract archive
     pause
     exit /b 1
 )
 
-del "%NODE_INSTALLER%"
-
-REM Refresh PATH to include Node.js
-for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set "UserPath=%%b"
-for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do set "SystemPath=%%b"
-set "PATH=%SystemPath%;%UserPath%;%ProgramFiles%\nodejs"
-
-echo Node.js installed successfully!
-timeout /t 2 /nobreak >nul
-node --version
-npm --version
+REM Move to target directory
+move "%TEMP%\Local_filesearch_agent-main" "%INSTALL_DIR%"
+del "%ZIP_FILE%"
 
 :setup_python_env
 echo.
@@ -93,72 +79,77 @@ if exist ".venv" (
 )
 
 echo Creating virtual environment with Python 3.13...
-uv venv --python 3.13 2>nul
-if !ERRORLEVEL! NEQ 0 (
-    echo Python 3.13 not found, trying with Python 3.11...
-    uv venv --python 3.11 2>nul
-    if !ERRORLEVEL! NEQ 0 (
-        echo Python 3.11 not found, trying with default Python...
-        uv venv 2>nul
-        if !ERRORLEVEL! NEQ 0 (
-            echo.
-            echo ERROR: Failed to create virtual environment!
-            echo Please ensure Python 3.11 or higher is installed.
-            pause
-            exit /b 1
-        )
+uv venv --python 3.13
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to create virtual environment with Python 3.13
+    echo Trying with Python 3.11...
+    uv venv --python 3.11
+    if %ERRORLEVEL% NEQ 0 (
+        echo Failed to create virtual environment
+        pause
+        exit /b 1
     )
 )
 
-echo Virtual environment created!
-
 echo Activating virtual environment...
-if not exist ".venv\Scripts\activate.bat" (
-    echo ERROR: Virtual environment activation script not found!
-    pause
-    exit /b 1
-)
-
 call .venv\Scripts\activate
-if !ERRORLEVEL! NEQ 0 (
+if %ERRORLEVEL% NEQ 0 (
     echo Failed to activate virtual environment
     pause
     exit /b 1
 )
 
-echo Virtual environment activated successfully!
-
 echo.
 echo Step 4: Installing Python dependencies...
 echo ---------------------------------
 
-echo Installing required packages from requirements.txt...
+echo Installing Python packages...
 if exist "requirements.txt" (
-    echo Found requirements.txt, installing packages...
     uv pip install -r requirements.txt
-    set INSTALL_RESULT=!ERRORLEVEL!
 ) else if exist "pyproject.toml" (
-    echo Found pyproject.toml, installing packages...
     uv pip install -r pyproject.toml
-    set INSTALL_RESULT=!ERRORLEVEL!
 ) else (
-    echo No requirements file found, installing core dependencies...
-    uv pip install fastapi uvicorn[standard] websockets python-multipart langchain langgraph langchain-openai langchain-groq chromadb python-dotenv pillow pytesseract pypdf python-docx openpyxl
-    set INSTALL_RESULT=!ERRORLEVEL!
-)
-
-if !INSTALL_RESULT! NEQ 0 (
-    echo.
-    echo ERROR: Failed to install Python dependencies!
-    echo Please check the error messages above.
+    echo No requirements file found!
     pause
     exit /b 1
 )
 
-echo Python dependencies installed successfully!
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to install dependencies
+    pause
+    exit /b 1
+)
 
 echo.
-echo Step 5: Setting up Electron frontend...
+echo Step 5: Starting FastAPI backend server...
+echo ----------------------------------------
+
+echo Starting backend server in background...
+
+REM Create a startup script for the backend
+(
+echo @echo off
+echo cd /d "%INSTALL_DIR%"
+echo call .venv\Scripts\activate
+echo start /B python -m uvicorn api_server:app --host 127.0.0.1 --port 8765
+) > START_BACKEND.bat
+
+REM Start the backend in background
+start "" /B cmd /c "cd /d "%INSTALL_DIR%" && call .venv\Scripts\activate && python -m uvicorn api_server:app --host 127.0.0.1 --port 8765"
+
+echo Waiting for backend to start...
+timeout /t 5 /nobreak >nul
+
+REM Check if backend is running
+powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8765/health' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
+if %ERRORLEVEL% EQU 0 (
+    echo Backend server started successfully!
+) else (
+    echo WARNING: Backend may not be running, but continuing...
+)
+
+echo.
+echo Step 6: Setting up Electron frontend...
 echo ----------------------------------------
 
 REM Create frontend directory if not exists
@@ -222,40 +213,18 @@ echo Creating Electron main file...
 (
 echo const { app, BrowserWindow, Tray, Menu, nativeImage, shell } = require^('electron'^);
 echo const path = require^('path'^);
-echo const { spawn } = require^('child_process'^);
 echo const http = require^('http'^);
 echo.
 echo let mainWindow;
 echo let tray;
-echo let backendProcess;
 echo.
 echo const BACKEND_PORT = 8765;
 echo const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 echo.
-echo // Start backend server
-echo function startBackend^(^) {
-echo     const pythonPath = path.join^(__dirname, '..', '.venv', 'Scripts', 'python.exe'^);
-echo     const serverPath = path.join^(__dirname, '..', 'api_server.py'^);
-echo.    
-echo     console.log^('Starting backend server...'^);
-echo     backendProcess = spawn^(pythonPath, ['-m', 'uvicorn', 'api_server:app', '--host', '127.0.0.1', '--port', BACKEND_PORT], {
-echo         cwd: path.join^(__dirname, '..'^),
-echo         stdio: 'inherit'
-echo     }^);
-echo.
-echo     backendProcess.on^('error', ^(err^) =^> {
-echo         console.error^('Failed to start backend:', err^);
-echo     }^);
-echo.
-echo     backendProcess.on^('exit', ^(code^) =^> {
-echo         console.log^(`Backend exited with code ${code}`^);
-echo     }^);
-echo }
-echo.
 echo // Check if backend is ready
 echo function checkBackend^(callback, attempts = 0^) {
 echo     if ^(attempts ^> 30^) {
-echo         console.error^('Backend failed to start after 30 attempts'^);
+echo         console.error^('Backend is not available. Please start the backend server.'^);
 echo         return;
 echo     }
 echo.
@@ -267,6 +236,9 @@ echo         } else {
 echo             setTimeout^(^(^) =^> checkBackend^(callback, attempts + 1^), 1000^);
 echo         }
 echo     }^).on^('error', ^(^) =^> {
+echo         if ^(attempts === 0^) {
+echo             console.log^('Waiting for backend server...'^);
+echo         }
 echo         setTimeout^(^(^) =^> checkBackend^(callback, attempts + 1^), 1000^);
 echo     }^);
 echo }
@@ -329,7 +301,6 @@ echo }
 echo.
 echo // App lifecycle
 echo app.whenReady^(^).then^(^(^) =^> {
-echo     startBackend^(^);
 echo     checkBackend^(^(^) =^> {
 echo         createWindow^(^);
 echo         createTray^(^);
@@ -344,9 +315,6 @@ echo }^);
 echo.
 echo app.on^('before-quit', ^(^) =^> {
 echo     app.isQuitting = true;
-echo     if ^(backendProcess^) {
-echo         backendProcess.kill^(^);
-echo     }
 echo }^);
 echo.
 echo app.disableHardwareAcceleration^(^);
@@ -358,16 +326,12 @@ if not exist "assets" mkdir assets
 echo Installing Electron and dependencies...
 call npm install
 
-if !ERRORLEVEL! NEQ 0 (
-    echo.
-    echo ERROR: Failed to install Electron dependencies!
-    echo Please check the error messages above.
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to install Electron dependencies
     cd ..
     pause
     exit /b 1
 )
-
-echo Electron and dependencies installed successfully!
 
 echo.
 echo Step 6: Building desktop application...
@@ -376,9 +340,8 @@ echo ----------------------------------------
 echo Building portable executable...
 call npm run dist
 
-if !ERRORLEVEL! NEQ 0 (
-    echo.
-    echo WARNING: Build failed, but you can still run with npm start
+if %ERRORLEVEL% NEQ 0 (
+    echo Build failed, but you can still run with npm start
     set BUILD_FAILED=1
 ) else (
     echo Build successful!
@@ -443,9 +406,10 @@ echo ============================================================
 echo   Setup Complete! ✓
 echo ============================================================
 echo.
+echo Installed to: %INSTALL_DIR%
+echo.
 echo Installation Summary:
 echo   [✓] uv package manager installed
-echo   [✓] Node.js and npm installed
 echo   [✓] Python virtual environment created
 echo   [✓] Python dependencies installed
 echo   [✓] Electron desktop app configured
