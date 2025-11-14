@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local File Search Agent</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Main Container -->
+    <div class="app-container">
+        
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-robot"></i>
+                <h1>File Search AI</h1>
+            </div>
+            
+            <div class="sidebar-section">
+                <h3><i class="fas fa-info-circle"></i> Status</h3>
+                <div class="status-indicator">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">Activating...</span>
+                </div>
+            </div>
+            
+            <div class="sidebar-section">
+                <h3><i class="fas fa-folder-open"></i> Indexed Documents</h3>
+                <div id="documentsList" class="documents-list">
+                    <p class="empty-state">No documents indexed yet</p>
+                </div>
+                <button class="btn-secondary" onclick="refreshDocuments()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            
+            <div class="sidebar-section">
+                <h3><i class="fas fa-cog"></i> Actions</h3>
+                <button class="btn-secondary" onclick="clearChat()">
+                    <i class="fas fa-trash"></i> Clear Chat
+                </button>
+                <button class="btn-secondary" onclick="newSession()">
+                    <i class="fas fa-plus"></i> New Session
+                </button>
+            </div>
+            
+
+        </aside>
+        
+        <!-- Main Chat Area -->
+        <main class="chat-container">
+            
+            <!-- Chat Header -->
+            <header class="chat-header">
+                <div class="header-left">
+                    <h2>AI Assistant</h2>
+                </div>
+                <div class="header-right">
+                    <button class="icon-btn" onclick="toggleHelp()" title="Help">
+                        <i class="fas fa-question-circle"></i>
+                    </button>
+                </div>
+            </header>
+            
+            <!-- Chat Messages -->
+            <div class="chat-messages" id="chatMessages">
+                <div class="welcome-message">
+                    <i class="fas fa-robot"></i>
+                    <h2>Welcome to Local File Search Agent! 👋</h2>
+                    <p>I can help you with:</p>
+                    <ul>
+                        <li><i class="fas fa-search"></i> Search for files across your system</li>
+                        <li><i class="fas fa-file-pdf"></i> Index and query documents (PDF, DOCX, XLSX, etc.)</li>
+                        <li><i class="fas fa-image"></i> Extract text from images using OCR</li>
+                        <li><i class="fas fa-comments"></i> Answer questions about your files</li>
+                    </ul>
+                    <p class="tip">💡 <strong>Try asking:</strong> "Find all PDF files in my Downloads folder" or "Index my resume and tell me about my skills"</p>
+                </div>
+            </div>
+            
+            <!-- Typing Indicator -->
+            <div class="typing-indicator" id="typingIndicator" style="display: none;">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+            
+            <!-- Chat Input -->
+            <div class="chat-input-container">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="Ask me anything about your files..."
+                        rows="1"
+                        onkeydown="handleKeyPress(event)"
+                    ></textarea>
+                    <button 
+                        class="send-btn" 
+                        id="sendBtn" 
+                        onclick="sendMessage()"
+                        disabled
+                    >
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <div class="input-hints">
+                    <small>
+                        <i class="fas fa-keyboard"></i> Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new line
+                    </small>
+                </div>
+            </div>
+            
+        </main>
+        
+    </div>
+    
+    <!-- Help Modal -->
+    <div class="modal" id="helpModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-question-circle"></i> Help & Examples</h2>
+                <button class="close-btn" onclick="toggleHelp()">×</button>
+            </div>
+            <div class="modal-body">
+                <h3>Example Questions:</h3>
+                <div class="example-list">
+                    <div class="example-item" onclick="useExample(this)">
+                        <i class="fas fa-search"></i>
+                        <span>Search for PDF files in my Documents folder</span>
+                    </div>
+                    <div class="example-item" onclick="useExample(this)">
+                        <i class="fas fa-file-alt"></i>
+                        <span>Index C:\Users\YourName\resume.pdf</span>
+                    </div>
+                    <div class="example-item" onclick="useExample(this)">
+                        <i class="fas fa-question"></i>
+                        <span>What are the skills mentioned in my resume?</span>
+                    </div>
+                    <div class="example-item" onclick="useExample(this)">
+                        <i class="fas fa-image"></i>
+                        <span>Extract text from C:\Users\YourName\certificate.png</span>
+                    </div>
+                </div>
+                
+                <h3>Features:</h3>
+                <ul>
+                    <li><strong>Semantic Search:</strong> Finds files based on meaning, not just keywords</li>
+                    <li><strong>Document Indexing:</strong> Index once, query multiple times</li>
+                    <li><strong>OCR Support:</strong> Extracts text from scanned PDFs and images</li>
+                    <li><strong>Session Memory:</strong> Remembers context throughout conversation</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>

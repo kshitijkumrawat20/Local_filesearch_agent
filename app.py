@@ -12,7 +12,7 @@ from typing import Dict, Any
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(project_root)
 
-from agents.file_search_agent import FileSearchAgent
+from agents.filesearch_agent import FileSearchAgent
 from config.settings import get_api_key, get_app_config, get_streamlit_config
 from ui.components import ChatUI, MainUI
 

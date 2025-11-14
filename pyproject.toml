@@ -37,6 +37,7 @@ dependencies = [
     "durationpy==0.10",
     "emoji==2.15.0",
     "executing==2.2.1",
+    "fastapi>=0.121.2",
     "fastmcp>=2.12.4",
     "filelock==3.19.1",
     "filetype==1.2.0",

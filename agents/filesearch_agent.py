@@ -25,11 +25,35 @@ class FileSearchAgent:
         self.api_key = api_key
         self.root_dir = root_dir
         # self.tools = get_file_tools(root_dir)
-        self.tools = get_file_tools()
+        self.file_tools_instance = None  # Store FileTools instance for cleanup
+        self.tools = self._initialize_tools()
         self.llm = self._initialize_llm()
         self.memory = MemorySaver()
         self.graph = self._build_graph()
         self.state_manager = StateManager()
+
+    def _initialize_tools(self):
+        """Initialize tools and store the FileTools instance for cleanup."""
+        from tools.file_tools import FileTools
+        self.file_tools_instance = FileTools(root_dir=self.root_dir)
+        return self.file_tools_instance.get_all_tools()
+    
+    def cleanup(self):
+        """Clean up resources when agent session ends."""
+        if self.file_tools_instance:
+            try:
+                print("[VERBOSE] Cleaning up FileSearchAgent session...")
+                self.file_tools_instance.cleanup_session_vectorstores()
+                print("[VERBOSE] ✅ Session cleanup completed")
+            except Exception as e:
+                print(f"[VERBOSE] Error during cleanup: {e}")
+    
+    def __del__(self):
+        """Cleanup when agent is destroyed."""
+        try:
+            self.cleanup()
+        except:
+            pass
 
     
     def _initialize_llm(self) -> ChatGroq:
@@ -103,7 +127,77 @@ class FileSearchAgent:
 - **File Operations:**
   - Use FileManagementToolkit's `list_directory` tool to list directories, files, and folders. The tool supports only allowed extensions, and directories are listed without extensions.
   - Do NOT use `list_directory` unless explicitly asked by the user to list files in a specific directory.
-  - Use the `create_vector_store_and_query` tool to read and query file contents when a user wants to search inside a file.
+
+### **Document Querying Workflow** (IMPORTANT):
+When a user wants to read or query a document's content, follow this TWO-STEP process:
+
+**Step 1: Index the document first**
+- Use `index_document` tool with the FULL file path
+- Wait for confirmation that indexing is complete
+- **REMEMBER THE FULL FILE PATH** - you'll need it for queries
+- This only needs to be done ONCE per document per session
+
+**Step 2: Query the indexed document**
+- Use `query_document` tool with the **SAME FILE PATH** and the user's question
+- You can use just the filename if only one document is indexed
+- You can call this MULTIPLE TIMES with different questions
+- **Always use the SAME file path from Step 1**
+- No need to re-index unless it's a different document
+
+**Step 3: Check what's indexed (optional)**
+- Use `list_indexed_documents` to see what documents are available
+- Helpful if you forget which documents are indexed
+
+**Step 4: For small documents like resumes (optional but recommended)**
+- Use `get_full_document_content` to get the COMPLETE document
+- This is better than semantic search for small documents
+- You'll see ALL sections: skills, projects, experience, etc.
+- Only use this for documents < 5 pages (resumes, CVs, cover letters)
+
+**Example workflow for RESUMES:**
+```
+User: "What's in my kshitijresume?"
+Step 1: Search → Found: C:\\Users\\hp\\Downloads\\kshitijresume.pdf
+Step 2: index_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf")
+Step 3: get_full_document_content("kshitijresume.pdf")  ← Get EVERYTHING!
+        ✅ Returns: Complete resume with all sections
+
+Now answer ALL follow-up questions from the full content:
+User: "What are the skills?"     → Answer from full content
+User: "What are the projects?"   → Answer from full content  
+User: "What are the tools?"      → Answer from full content
+```
+
+**Example workflow for LARGE documents:**
+```
+User: "What's in the 100-page report?"
+Step 1: index_document("report.pdf")
+Step 2: query_document("report.pdf", "What is the executive summary?")
+Step 3: query_document("report.pdf", "What are the financial results?")
+(Use semantic search for large docs, NOT get_full_document_content)
+```
+
+**Example workflow:**
+```
+User: "What's in my kshitijresume?"
+Step 1: Search for file → Found: C:\\Users\\hp\\Downloads\\kshitijresume.pdf
+Step 2: index_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf")
+Step 3: query_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf", "What are the skills?")
+        ✅ Returns: C++, Python, ML, NLP...
+
+User: "What projects did he make?" (SAME document - remember the path!)
+Step 4: query_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf", "What are the projects?")
+        OR simply: query_document("kshitijresume.pdf", "What are the projects?")
+        ✅ Uses SAME vectorstore, returns projects
+```
+
+**CRITICAL RULES:**
+1. **NEVER** re-index for follow-up questions about the SAME document
+2. **ALWAYS** use the same file path from the index step
+3. You can use just the filename if there's only one indexed document
+4. Use `list_indexed_documents` if you're unsure what's indexed
+5. **For resumes/CVs**: Use `get_full_document_content` to get ALL sections at once
+6. **For large docs**: Use `query_document` for semantic search
 
 ### Guidelines for File Search:
 - **Search Strategy:** If the user requests to find a file with a specific name like "caste certificate," start by breaking the terms into partial queries, e.g., search for "caste" and then "certificate."
@@ -130,7 +224,7 @@ class FileSearchAgent:
 - Perform searches systematically for relevant directories and files.
 - Open files or folder paths using full Windows formatting.
 - Only open files if explicitly requested.
-- If the user wants to read or query the file’s content, create a vector store from the file and then query its content using the `create_vector_store_and_query` tool.
+- **Remember**: For document content queries, ALWAYS use index_document first, then query_document. This allows multiple queries on the same document without re-indexing.
 
 By carefully following the above approach, you will be able to assist users effectively in finding and managing their files!"""
     

@@ -19,3 +19,6 @@ env/
 c_drive_file_index.json
 chroma_db/
 file_metadata.json
+session_vectorstores
+frontend/node_modules
+frontend/dist

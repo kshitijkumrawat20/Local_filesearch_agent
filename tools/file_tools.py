@@ -53,6 +53,11 @@ class FileTools:
         self.toolkit = FileManagementToolkit(root_dir=self.root_dir)
         self.file_management_tools = self.toolkit.get_tools()
         self.vectorstore = self.get_vectorstore()
+        
+        # Session-based document vectorstores (persistent)
+        self.document_vectorstores = {}  # {file_path: vectorstore}
+        self.session_persist_dir = "./session_vectorstores"
+        os.makedirs(self.session_persist_dir, exist_ok=True)
 
     def get_hf_embeddings(self):
         """Get HuggingFace embeddings model with global caching."""
@@ -203,14 +208,481 @@ class FileTools:
                 print(f"[VERBOSE] {error_msg}")
                 return error_msg
         
+        # Create document query tool with self bound
+        @tool
+        def query_document_tool(file_path: str, query: str) -> str:
+            """Query a specific document that was previously indexed. You can use just the filename if only one document is indexed. For comprehensive answers about resumes/CVs, try broader queries."""
+            return self.query_document(file_path, query)
+        
+        @tool
+        def index_document_tool(file_path: str) -> str:
+            """Index a document for querying. Call this first before querying a document. Returns the indexed document info."""
+            return self.index_document(file_path)
+        
+        @tool
+        def list_indexed_documents_tool() -> str:
+            """List all documents currently indexed in this session. Use this to see what documents are available for querying."""
+            return self.list_indexed_documents()
+        
+        @tool
+        def get_full_document_content_tool(file_path: str) -> str:
+            """Get the COMPLETE content of an indexed document. Use this for small documents like resumes when you need to see everything, not just search results."""
+            return self.get_full_document_content(file_path)
+        
         return [
             # self.shell_tool,
             self.file_management_tools[6],  # List directory tool
             open_file_tool,
-            create_vector_store_and_query,
+            index_document_tool,  # New: Index document
+            query_document_tool,  # New: Query indexed document
+            list_indexed_documents_tool,  # New: List indexed documents
+            get_full_document_content_tool,  # New: Get complete document
             search_files_tool,
             extract_image_text
         ]
+    
+    def list_indexed_documents(self) -> str:
+        """List all documents currently indexed in this session.
+        
+        Returns:
+            List of indexed documents with details
+        """
+        if not self.document_vectorstores:
+            return "📋 No documents are currently indexed.\n\n💡 Use the index_document tool to index a document first."
+        
+        result = f"📋 Currently indexed documents ({len(self.document_vectorstores)}):\n\n"
+        
+        for i, (file_path, vs_info) in enumerate(self.document_vectorstores.items(), 1):
+            filename = os.path.basename(file_path)
+            doc_count = vs_info['doc_count']
+            result += f"{i}. **{filename}**\n"
+            result += f"   📁 Path: {file_path}\n"
+            result += f"   📊 Chunks: {doc_count}\n"
+            result += f"   ✅ Ready for querying\n\n"
+        
+        result += "💡 To query any of these documents, use:\n"
+        result += "   query_document(filename, your_question)\n"
+        result += "   or\n"
+        result += "   query_document(full_path, your_question)"
+        
+        return result
+    
+    def get_full_document_content(self, file_path: str) -> str:
+        """Get the complete content of an indexed document.
+        
+        Useful for small documents like resumes where you want to see everything.
+        
+        Args:
+            file_path: Full path or filename of the indexed document
+            
+        Returns:
+            Complete document content
+        """
+        try:
+            # Smart file path matching (same as query_document)
+            if not os.path.isabs(file_path) and len(self.document_vectorstores) > 0:
+                filename_lower = os.path.basename(file_path).lower()
+                matched_paths = [p for p in self.document_vectorstores.keys() 
+                                if os.path.basename(p).lower() == filename_lower]
+                
+                if len(matched_paths) == 1:
+                    file_path = matched_paths[0]
+                elif len(matched_paths) == 0 and len(self.document_vectorstores) == 1:
+                    file_path = list(self.document_vectorstores.keys())[0]
+            
+            # Check if document is indexed
+            if file_path not in self.document_vectorstores:
+                return (
+                    f"❌ Document '{os.path.basename(file_path)}' is not indexed.\n"
+                    f"💡 Use index_document first."
+                )
+            
+            print(f"[VERBOSE] Getting full content of: {file_path}")
+            
+            # Get vectorstore
+            vs_info = self.document_vectorstores[file_path]
+            vectorstore = vs_info['vectorstore']
+            
+            # Get ALL documents from vectorstore (no similarity search, just retrieve all)
+            # Use a dummy search to get all documents, or access the collection directly
+            try:
+                # Get all documents by searching with empty query and high k
+                all_results = vectorstore.similarity_search("", k=100)
+                
+                if not all_results:
+                    # Fallback: get from collection directly
+                    collection = vectorstore._collection
+                    all_data = collection.get()
+                    
+                    if all_data and 'documents' in all_data:
+                        full_content = "\n\n---\n\n".join(all_data['documents'])
+                    else:
+                        return "❌ Could not retrieve document content"
+                else:
+                    # Combine all chunks
+                    full_content = "\n\n---\n\n".join([doc.page_content for doc in all_results])
+                
+                print(f"[VERBOSE] Retrieved complete content ({len(full_content)} characters)")
+                
+                # Limit output to reasonable size (100KB max)
+                max_chars = 100000
+                if len(full_content) > max_chars:
+                    full_content = full_content[:max_chars] + f"\n\n... (truncated, showing first {max_chars} characters)"
+                
+                return (
+                    f"📖 Complete content of '{os.path.basename(file_path)}':\n"
+                    f"{'=' * 70}\n\n"
+                    f"{full_content}\n\n"
+                    f"{'=' * 70}\n"
+                    f"✅ End of document"
+                )
+                
+            except Exception as e:
+                print(f"[VERBOSE] Error retrieving full content: {e}")
+                return f"❌ Error retrieving full content: {str(e)}"
+                
+        except Exception as e:
+            error_msg = f"❌ Error getting document content: {str(e)}"
+            print(f"[VERBOSE] {error_msg}")
+            return error_msg
+    
+    def index_document(self, file_path: str) -> str:
+        """Index a document for persistent querying throughout the session.
+        
+        Args:
+            file_path: Full path to the document
+            
+        Returns:
+            Success/error message
+        """
+        try:
+            if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                return f"❌ File does not exist: {file_path}"
+            
+            # Check if already indexed
+            if file_path in self.document_vectorstores:
+                return f"✅ Document '{os.path.basename(file_path)}' is already indexed and ready for querying."
+            
+            print(f"[VERBOSE] Indexing document: {file_path}")
+            
+            # Load document based on type
+            documents = []
+            file_extension = file_path.lower()
+            
+            if file_extension.endswith('.pdf'):
+                # Try to load PDF with text extraction first
+                loader = PyMuPDFLoader(file_path)
+                raw_docs = loader.load()
+                
+                # Check if PDF has extractable text or if it's image-based/scanned
+                total_text = "".join([doc.page_content for doc in raw_docs])
+                is_scanned = len(total_text.strip()) < 100  # Very little text = likely scanned
+                
+                if is_scanned:
+                    print(f"[VERBOSE] Detected scanned/image-based PDF - extracting images and using OCR")
+                    
+                    # Extract images from PDF and use OCR
+                    try:
+                        import fitz  # PyMuPDF
+                        pdf_document = fitz.open(file_path)
+                        ocr_texts = []
+                        
+                        for page_num in range(len(pdf_document)):
+                            page = pdf_document[page_num]
+                            image_list = page.get_images()
+                            
+                            if image_list:
+                                print(f"[VERBOSE] Page {page_num + 1}: Found {len(image_list)} images")
+                                
+                                for img_index, img_info in enumerate(image_list):
+                                    xref = img_info[0]
+                                    base_image = pdf_document.extract_image(xref)
+                                    image_bytes = base_image["image"]
+                                    
+                                    # Save image temporarily
+                                    import tempfile
+                                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_img:
+                                        temp_img.write(image_bytes)
+                                        temp_img_path = temp_img.name
+                                    
+                                    # Use OCR to extract text from image
+                                    print(f"[VERBOSE] Extracting text from image {img_index + 1} on page {page_num + 1}")
+                                    ocr_text = extract_image_text(temp_img_path)
+                                    
+                                    if ocr_text and not ocr_text.startswith("Error"):
+                                        ocr_texts.append(f"[Page {page_num + 1}, Image {img_index + 1}]\n{ocr_text}")
+                                    
+                                    # Clean up temp file
+                                    try:
+                                        os.unlink(temp_img_path)
+                                    except:
+                                        pass
+                        
+                        pdf_document.close()
+                        
+                        if ocr_texts:
+                            # Create documents from OCR text
+                            combined_ocr = "\n\n---\n\n".join(ocr_texts)
+                            documents = [Document(
+                                page_content=combined_ocr,
+                                metadata={"source": file_path, "type": "scanned_pdf_with_ocr"}
+                            )]
+                            print(f"[VERBOSE] Successfully extracted text from {len(ocr_texts)} images using OCR")
+                        else:
+                            print(f"[VERBOSE] No images found or OCR failed, using original text")
+                            documents = raw_docs
+                            
+                    except Exception as ocr_error:
+                        print(f"[VERBOSE] OCR extraction failed: {ocr_error}")
+                        print(f"[VERBOSE] Falling back to original text extraction")
+                        documents = raw_docs
+                else:
+                    print(f"[VERBOSE] PDF has text content - using standard extraction")
+                    
+                    # For resumes/small PDFs, use text splitting for better chunking
+                    if len(raw_docs) <= 5:  # Small document like a resume
+                        from langchain.text_splitter import RecursiveCharacterTextSplitter
+                        text_splitter = RecursiveCharacterTextSplitter(
+                            chunk_size=800,  # Smaller chunks for better search
+                            chunk_overlap=200,  # Good overlap to maintain context
+                            length_function=len,
+                            separators=["\n\n", "\n", ". ", " ", ""]
+                        )
+                        documents = text_splitter.split_documents(raw_docs)
+                        print(f"[VERBOSE] Split PDF into {len(documents)} chunks (was {len(raw_docs)} pages)")
+                    else:
+                        # Large document, use pages as-is
+                        documents.extend(raw_docs)
+                        print(f"[VERBOSE] Using {len(documents)} pages from PDF")
+                    
+            elif file_extension.endswith('.docx'):
+                loader = Docx2txtLoader(file_path)
+                documents.extend(loader.load())
+            elif file_extension.endswith(('.xlsx', '.xls')):
+                documents.extend(read_excel_file_safely(file_path))
+            elif file_extension.endswith('.pptx'):
+                loader = UnstructuredPowerPointLoader(file_path)
+                documents.extend(loader.load())
+            else:
+                # Handle text files
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        documents.append(Document(page_content=content, metadata={"source": file_path}))
+                except UnicodeDecodeError:
+                    # Try different encodings
+                    for encoding in ['latin-1', 'cp1252', 'iso-8859-1']:
+                        try:
+                            with open(file_path, "r", encoding=encoding) as f:
+                                content = f.read()
+                                documents.append(Document(page_content=content, metadata={"source": file_path}))
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                    else:
+                        return f"❌ Unable to read file due to encoding issues: {file_path}"
+            
+            if not documents:
+                return f"❌ No content could be extracted from: {file_path}"
+            
+            # Create persistent vectorstore for this document
+            import hashlib
+            file_hash = hashlib.md5(file_path.encode()).hexdigest()[:8]
+            persist_path = os.path.join(self.session_persist_dir, f"doc_{file_hash}")
+            
+            print(f"[VERBOSE] Creating persistent vectorstore at: {persist_path}")
+            
+            embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=os.getenv("OPENAI_API_KEY"))
+            vectorstore = Chroma(
+                collection_name=f"doc_{file_hash}",
+                embedding_function=embeddings,
+                persist_directory=persist_path
+            )
+            vectorstore.add_documents(documents)
+            
+            # Store in session
+            self.document_vectorstores[file_path] = {
+                'vectorstore': vectorstore,
+                'persist_path': persist_path,
+                'doc_count': len(documents)
+            }
+            
+            print(f"[VERBOSE] Successfully indexed {len(documents)} document chunks")
+            
+            return (
+                f"✅ Successfully indexed '{os.path.basename(file_path)}'!\n\n"
+                f"📁 **Full path**: {file_path}\n"
+                f"📊 Processed: {len(documents)} document chunks\n"
+                f"✅ Status: Ready for querying\n\n"
+                f"💡 To query this document, use:\n"
+                f"   query_document(\"{file_path}\", \"your question\")\n"
+                f"   OR simply:\n"
+                f"   query_document(\"{os.path.basename(file_path)}\", \"your question\")\n\n"
+                f"🔄 This document stays indexed for the entire session - no need to re-index!"
+            )
+            
+        except Exception as e:
+            error_msg = f"❌ Error indexing document: {str(e)}"
+            print(f"[VERBOSE] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return error_msg
+    
+    def query_document(self, file_path: str, query: str) -> str:
+        """Query a previously indexed document.
+        
+        Args:
+            file_path: Full path to the document (or just filename if only one document indexed)
+            query: Question to ask about the document
+            
+        Returns:
+            Answer based on document content
+        """
+        try:
+            # Smart file path matching - if only filename provided, try to find full path
+            if not os.path.isabs(file_path) and len(self.document_vectorstores) > 0:
+                # User provided just filename, try to match with indexed documents
+                filename_lower = os.path.basename(file_path).lower()
+                
+                matched_paths = []
+                for indexed_path in self.document_vectorstores.keys():
+                    if os.path.basename(indexed_path).lower() == filename_lower:
+                        matched_paths.append(indexed_path)
+                
+                if len(matched_paths) == 1:
+                    file_path = matched_paths[0]
+                    print(f"[VERBOSE] Matched filename to: {file_path}")
+                elif len(matched_paths) > 1:
+                    return (
+                        f"❌ Multiple documents with name '{file_path}' are indexed:\n" +
+                        "\n".join([f"  - {p}" for p in matched_paths]) +
+                        "\n\n💡 Please specify the full path."
+                    )
+                else:
+                    # No match found, check if there's only one indexed document
+                    if len(self.document_vectorstores) == 1:
+                        file_path = list(self.document_vectorstores.keys())[0]
+                        print(f"[VERBOSE] Using the only indexed document: {file_path}")
+                    else:
+                        return (
+                            f"❌ Document '{file_path}' not found in indexed documents.\n"
+                            f"📋 Currently indexed documents:\n" +
+                            "\n".join([f"  - {os.path.basename(p)}" for p in self.document_vectorstores.keys()]) +
+                            "\n\n💡 Please use the exact filename or full path."
+                        )
+            
+            # Check if document is indexed
+            if file_path not in self.document_vectorstores:
+                return (
+                    f"❌ Document '{os.path.basename(file_path)}' is not indexed yet.\n"
+                    f"📋 Currently indexed documents:\n" +
+                    "\n".join([f"  - {os.path.basename(p)}" for p in self.document_vectorstores.keys()]) +
+                    f"\n\n💡 Please use the index_document tool first to index this document."
+                )
+            
+            print(f"[VERBOSE] Querying document: {file_path}")
+            print(f"[VERBOSE] Query: {query}")
+            
+            # Get vectorstore
+            vs_info = self.document_vectorstores[file_path]
+            vectorstore = vs_info['vectorstore']
+            
+            # Perform similarity search with more results for better coverage
+            # Increase k to get more chunks - resumes are usually small documents
+            results = vectorstore.similarity_search(query, k=10)
+            
+            if not results:
+                return f"❌ No relevant content found for query: '{query}'"
+            
+            # Format results - show more content per result for resumes
+            result_summaries = []
+            for i, doc in enumerate(results, 1):
+                # For short documents like resumes, show more content (up to 1000 chars)
+                content = doc.page_content[:1000] + "..." if len(doc.page_content) > 1000 else doc.page_content
+                result_summaries.append(f"📄 Section {i}:\n{content}")
+            
+            response = (
+                f"📖 Querying '{os.path.basename(file_path)}' - Found {len(results)} relevant sections:\n\n"
+                + "\n\n".join(result_summaries)
+            )
+            
+            print(f"[VERBOSE] Returned {len(results)} results from {file_path}")
+            
+            return response
+            
+        except Exception as e:
+            error_msg = f"❌ Error querying document: {str(e)}"
+            print(f"[VERBOSE] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return error_msg
+    
+    def cleanup_session_vectorstores(self):
+        """Clean up all session-based vectorstores when session ends."""
+        try:
+            print("[VERBOSE] Cleaning up session vectorstores...")
+            
+            # Close all vectorstores
+            for file_path, vs_info in self.document_vectorstores.items():
+                try:
+                    vectorstore = vs_info.get('vectorstore')
+                    if vectorstore:
+                        # Try to properly close the vectorstore
+                        try:
+                            if hasattr(vectorstore, '_client'):
+                                vectorstore._client = None
+                            if hasattr(vectorstore, '_collection'):
+                                vectorstore._collection = None
+                        except:
+                            pass
+                        del vs_info['vectorstore']
+                except Exception as e:
+                    print(f"[VERBOSE] Error closing vectorstore for {file_path}: {e}")
+            
+            self.document_vectorstores.clear()
+            
+            # Force garbage collection multiple times
+            import gc
+            gc.collect()
+            gc.collect()
+            
+            # Wait longer for file handles to release on Windows
+            import time
+            time.sleep(2)
+            
+            # Delete the session directory with retry logic
+            if os.path.exists(self.session_persist_dir):
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        import shutil
+                        shutil.rmtree(self.session_persist_dir, ignore_errors=True)
+                        print(f"[VERBOSE] ✅ Cleaned up session vectorstores")
+                        break
+                    except PermissionError as e:
+                        if attempt < max_retries - 1:
+                            print(f"[VERBOSE] Retry {attempt + 1}/{max_retries} - waiting for file handles...")
+                            time.sleep(1)
+                            gc.collect()
+                        else:
+                            print(f"[VERBOSE] ⚠️ Could not delete session directory after {max_retries} attempts: {e}")
+                    except Exception as e:
+                        print(f"[VERBOSE] ⚠️ Could not delete session directory: {e}")
+                        break
+            
+        except Exception as e:
+            # Silently handle cleanup errors - don't show scary error messages
+            if "WinError 6" not in str(e):  # Only log non-handle errors
+                print(f"[VERBOSE] Cleanup completed with minor issues: {e}")
+    
+    def __del__(self):
+        """Cleanup when FileTools instance is destroyed."""
+        try:
+            self.cleanup_session_vectorstores()
+        except Exception as e:
+            # Silently handle - object is being destroyed anyway
+            if "WinError 6" not in str(e):
+                pass  # Ignore Windows handle errors during destruction
 
 
 def read_excel_file_safely(file_path: str) -> List[Document]:
@@ -335,75 +807,22 @@ def open_file_tool(file_path: str) -> str:
         print(f"[VERBOSE] {error_msg}")
         return error_msg
 
+# DEPRECATED: This function is replaced by index_document and query_document
+# Keeping for backwards compatibility but not recommended
 @tool
 def create_vector_store_and_query(file_path: str, query: str) -> str:
-    """Create a vector store from files path given and query it."""
-    try:
-        if not os.path.exists(file_path) or not os.path.isfile(file_path):
-            return f"File does not exist: {file_path}"
-
-        documents = []
-        file_extension = file_path.lower()
-        
-        if file_extension.endswith('.pdf'):
-            loader = PyMuPDFLoader(file_path)
-            documents.extend(loader.load())
-        elif file_extension.endswith('.docx'):
-            loader = Docx2txtLoader(file_path)
-            documents.extend(loader.load())
-        elif file_extension.endswith(('.xlsx', '.xls')):
-            # Use our safe Excel reader
-            documents.extend(read_excel_file_safely(file_path))
-        elif file_extension.endswith('.pptx'):
-            loader = UnstructuredPowerPointLoader(file_path)
-            documents.extend(loader.load())
-        else:
-            # Handle text files and other formats
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    documents.append(Document(page_content=content))
-            except UnicodeDecodeError:
-                # Try different encodings
-                for encoding in ['latin-1', 'cp1252', 'iso-8859-1']:
-                    try:
-                        with open(file_path, "r", encoding=encoding) as f:
-                            content = f.read()
-                            documents.append(Document(page_content=content))
-                        break
-                    except UnicodeDecodeError:
-                        continue
-                else:
-                    return f"Unable to read file due to encoding issues: {file_path}"
-        
-        if not documents:
-            return f"No content could be extracted from the file: {file_path}"
-        
-        # Create an in-memory Chroma instance
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=os.getenv("OPENAI_API_KEY"))
-        vector_store = Chroma(
-            collection_name="my_in_memory_collection",
-            embedding_function=embeddings,
-        )
-        vector_store.add_documents(documents)
-
-        results = vector_store.similarity_search(query, k=5)
-
-        # Process the results
-        if not results:
-            return f"No relevant content found for query '{query}' in file {os.path.basename(file_path)}"
-        
-        result_summaries = []
-        for i, doc in enumerate(results, 1):
-            content = doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content
-            result_summaries.append(f"Result {i}:\n{content}")
-        
-        return "\n\n".join(result_summaries)
-        
-    except Exception as e:
-        error_msg = f"Error creating vector store and querying file: {str(e)}"
-        print(f"[VERBOSE] {error_msg}")
-        return error_msg
+    """[DEPRECATED] Create a vector store from files path given and query it.
+    
+    ⚠️ This tool is deprecated. Use index_document first, then query_document instead.
+    This creates a temporary vectorstore that only works once.
+    """
+    return (
+        "⚠️ This tool is deprecated and may not work reliably.\n\n"
+        "Please use the new workflow:\n"
+        "1. First call: index_document(file_path) - to index the document\n"
+        "2. Then call: query_document(file_path, query) - to ask questions\n\n"
+        "The new approach creates a persistent vectorstore that works for multiple queries."
+    )
     
 # @tool
 # def list_directory(directory_path: str, required_extension_file: List[str]) -> List[str]:
