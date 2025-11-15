@@ -1,12 +1,31 @@
 {
-  "name": "local-file-search-agent",
+  "name": "lekha-ramdhari-fintech",
+  "productName": "LEKHA",
   "version": "1.0.0",
-  "description": "AI file search desktop app",
+  "description": "LEKHA - Personal Assistant to your growth",
   "main": "electron-main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.ramdhari.lekha",
+    "productName": "LEKHA",
+    "win": {
+      "target": "portable",
+      "icon": "icon.ico"
+    },
+    "portable": {
+      "artifactName": "LEKHA.exe"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/**/*",
+      "!dist/**/*"
+    ]
   },
   "devDependencies": {
-    "electron": "^28.0.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
   }
 }

@@ -587,26 +587,62 @@ class FileTools:
             vs_info = self.document_vectorstores[file_path]
             vectorstore = vs_info['vectorstore']
             
-            # Perform similarity search with more results for better coverage
-            # Increase k to get more chunks - resumes are usually small documents
-            results = vectorstore.similarity_search(query, k=10)
+            # Smart query handling - detect counting questions
+            query_lower = query.lower()
+            is_counting_query = any(word in query_lower for word in ['how many', 'count', 'total', 'number of', 'how much'])
+            
+            # For Excel files, always fetch more context
+            file_ext = os.path.splitext(file_path)[1].lower()
+            is_excel = file_ext in ['.xlsx', '.xls', '.csv']
+            
+            # Adjust search parameters based on query type
+            if is_counting_query or is_excel:
+                # For counting queries or Excel files, get more results to ensure we capture summary info
+                k = 15
+                print(f"[VERBOSE] Detected {'counting query' if is_counting_query else 'Excel file'} - fetching {k} chunks")
+            else:
+                k = 10
+            
+            # Perform similarity search
+            results = vectorstore.similarity_search(query, k=k)
             
             if not results:
                 return f"❌ No relevant content found for query: '{query}'"
             
-            # Format results - show more content per result for resumes
+            # ENHANCED: Check if summary section is in results (for Excel files)
+            summary_found = False
+            for doc in results:
+                if "EXCEL FILE SUMMARY" in doc.page_content or "Total Data Rows" in doc.page_content:
+                    summary_found = True
+                    break
+            
+            # Format results intelligently
             result_summaries = []
             for i, doc in enumerate(results, 1):
-                # For short documents like resumes, show more content (up to 1000 chars)
-                content = doc.page_content[:1000] + "..." if len(doc.page_content) > 1000 else doc.page_content
-                result_summaries.append(f"📄 Section {i}:\n{content}")
+                content = doc.page_content
+                
+                # For counting queries, prioritize showing summary and metadata
+                if is_counting_query and ("SUMMARY" in content or "Rows:" in content or "Total" in content):
+                    # Show full content for summary sections
+                    result_summaries.insert(0, f"📊 KEY INFO:\n{content}")
+                else:
+                    # Show truncated content for other sections
+                    max_len = 800 if is_excel else 1000
+                    truncated = content[:max_len] + "..." if len(content) > max_len else content
+                    result_summaries.append(f"📄 Section {i}:\n{truncated}")
             
-            response = (
-                f"📖 Querying '{os.path.basename(file_path)}' - Found {len(results)} relevant sections:\n\n"
-                + "\n\n".join(result_summaries)
-            )
+            # Build response with smart hints
+            response = f"📖 Query: '{query}'\n"
+            response += f"📁 Document: '{os.path.basename(file_path)}'\n"
+            response += f"🔍 Found {len(results)} relevant sections\n\n"
             
-            print(f"[VERBOSE] Returned {len(results)} results from {file_path}")
+            # Add helpful context for counting queries
+            if is_counting_query and is_excel:
+                response += "💡 TIP: Look for 'Total Rows', 'Rows:', or count numbers in the data below:\n\n"
+            
+            response += "\n\n".join(result_summaries[:10])  # Limit to top 10 for readability
+            
+            print(f"[VERBOSE] Returned {len(results)} results from {file_path} (counting query: {is_counting_query})")
             
             return response
             
@@ -686,11 +722,11 @@ class FileTools:
 
 
 def read_excel_file_safely(file_path: str) -> List[Document]:
-    """Safely read Excel file with multiple fallback methods."""
+    """Safely read Excel file with multiple fallback methods and preserve structure for better querying."""
     documents = []
     
     try:
-        # Method 1: Try pandas with different engines
+        # Method 1: Try pandas with different engines - IMPROVED for better structure
         if EXCEL_DEPS_AVAILABLE:
             print(f"[VERBOSE] Trying to read Excel file with pandas: {file_path}")
             
@@ -700,24 +736,56 @@ def read_excel_file_safely(file_path: str) -> List[Document]:
             for engine in engines:
                 try:
                     if engine:
-                        df = pd.read_excel(file_path, engine=engine, sheet_name=None)  # Read all sheets
+                        df_dict = pd.read_excel(file_path, engine=engine, sheet_name=None)  # Read all sheets
                     else:
-                        df = pd.read_excel(file_path, sheet_name=None)  # Let pandas choose engine
+                        df_dict = pd.read_excel(file_path, sheet_name=None)  # Let pandas choose engine
                     
-                    # Convert all sheets to text
+                    # Convert all sheets to text with ENHANCED METADATA
                     all_content = []
-                    for sheet_name, sheet_df in df.items():
-                        sheet_content = f"Sheet: {sheet_name}\n"
-                        sheet_content += sheet_df.to_string(index=False)
+                    
+                    # Add file summary at the top
+                    summary = f"📊 EXCEL FILE SUMMARY: {os.path.basename(file_path)}\n"
+                    summary += f"Total Sheets: {len(df_dict)}\n"
+                    total_rows = sum(len(df) for df in df_dict.values())
+                    summary += f"Total Data Rows (all sheets): {total_rows}\n\n"
+                    all_content.append(summary)
+                    
+                    for sheet_name, sheet_df in df_dict.items():
+                        # Remove completely empty rows
+                        sheet_df = sheet_df.dropna(how='all')
+                        
+                        # Sheet header with metadata
+                        sheet_content = f"{'='*60}\n"
+                        sheet_content += f"📋 SHEET: {sheet_name}\n"
+                        sheet_content += f"Rows: {len(sheet_df)} | Columns: {len(sheet_df.columns)}\n"
+                        sheet_content += f"{'='*60}\n\n"
+                        
+                        # Column names
+                        sheet_content += f"COLUMNS: {', '.join(str(col) for col in sheet_df.columns)}\n\n"
+                        
+                        # Data with row numbers for counting
+                        if len(sheet_df) > 0:
+                            sheet_content += f"DATA (showing all {len(sheet_df)} rows):\n"
+                            # Convert to string with better formatting
+                            sheet_content += sheet_df.to_string(index=True, max_rows=None)
+                        else:
+                            sheet_content += "(No data in this sheet)\n"
+                        
                         all_content.append(sheet_content)
                     
                     combined_content = "\n\n".join(all_content)
                     documents.append(Document(
                         page_content=combined_content,
-                        metadata={"source": file_path, "type": "excel"}
+                        metadata={
+                            "source": file_path, 
+                            "type": "excel",
+                            "total_sheets": len(df_dict),
+                            "total_rows": total_rows,
+                            "engine": engine or "default"
+                        }
                     ))
                     
-                    print(f"[VERBOSE] Successfully read Excel file with engine: {engine}")
+                    print(f"[VERBOSE] Successfully read Excel file with engine: {engine} ({total_rows} total rows)")
                     return documents
                     
                 except Exception as e:

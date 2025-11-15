@@ -2,6 +2,8 @@
 File search agent implementation using LangGraph.
 """
 from typing import List
+import os
+import logging
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
@@ -17,6 +19,8 @@ from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings   
 from dotenv import load_dotenv
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class FileSearchAgent:
     """AI agent for searching and managing files on Windows systems."""
@@ -57,25 +61,58 @@ class FileSearchAgent:
 
     
     def _initialize_llm(self) -> ChatGroq:
-        """Initialize the language model."""
+        """Initialize the language model with fallback support."""
         config = get_llm_config()
-        # return ChatGroq(
-        #     model=config["model"],
-        #     api_key=self.api_key,
-        #     temperature=config["temperature"]
-        # )
-
-        return ChatOpenAI(
-            model=config["model"],
-            # temperature=0,
-            # max_retries=2,
-            api_key=self.api_key
-        )
-        # llm = ChatOllama(
-        #     model="granite4:latest",
-        #     temperature=0,
-        #     # other params...
-        # )
+        provider = config.get("provider", "openai")
+        
+        try:
+            if provider == "openai":
+                logger.info(f"🤖 Initializing OpenAI: {config['model']}")
+                return ChatOpenAI(
+                    model=config["model"],
+                    temperature=config["temperature"],
+                    max_retries=config.get("max_retries", 3),
+                    timeout=config.get("timeout", 60),
+                    api_key=self.api_key
+                )
+            elif provider == "groq":
+                logger.info(f"🤖 Initializing Groq: {config['model']}")
+                return ChatGroq(
+                    model=config["model"],
+                    api_key=os.getenv("GROQ_API_KEY"),
+                    temperature=config["temperature"],
+                    max_retries=config.get("max_retries", 3),
+                    timeout=config.get("timeout", 60)
+                )
+            elif provider == "ollama":
+                logger.info(f"🤖 Initializing Ollama: {config['model']}")
+                return ChatOllama(
+                    model=config["model"],
+                    temperature=config["temperature"],
+                    timeout=config.get("timeout", 120)
+                )
+            else:
+                # Default fallback to OpenAI
+                logger.warning(f"Unknown provider '{provider}', defaulting to OpenAI")
+                return ChatOpenAI(
+                    model="gpt-4o-mini",
+                    temperature=0.1,
+                    max_retries=3,
+                    api_key=self.api_key
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize {provider}: {e}")
+            # Try fallback to Groq
+            if provider != "groq" and os.getenv("GROQ_API_KEY"):
+                logger.info("🔄 Falling back to Groq...")
+                return ChatGroq(
+                    model="llama-3.3-70b-versatile",
+                    api_key=os.getenv("GROQ_API_KEY"),
+                    temperature=0.1
+                )
+            else:
+                raise Exception(f"Failed to initialize any LLM provider: {e}")
     
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""

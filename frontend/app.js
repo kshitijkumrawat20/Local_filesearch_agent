@@ -291,6 +291,64 @@ function useExample(element) {
 }
 
 // ===================================
+// Update Management
+// ===================================
+async function updateApp() {
+    if (!confirm('🔄 Update LEKHA from GitHub?\n\n' +
+                 '✅ Latest features and fixes\n' +
+                 '✅ Your indexed documents will be preserved\n' +
+                 '✅ App will restart automatically\n\n' +
+                 'This takes about 2-3 minutes.\n\n' +
+                 'Continue?')) {
+        return;
+    }
+    
+    const btn = document.getElementById('updateAppBtn');
+    const statusDiv = document.getElementById('updateStatus');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
+    
+    try {
+        const response = await fetch(`${config.apiUrl}/update/app`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        statusDiv.textContent = data.message;
+        statusDiv.className = 'update-status-text info';
+        
+        addMessage('assistant', 
+            `🚀 Update started!\n\n` +
+            `${data.message}\n\n` +
+            `📋 What's happening:\n` +
+            `• Downloading latest code from GitHub\n` +
+            `• Updating application files\n` +
+            `• Your documents and data are safe\n` +
+            `• App will restart when ready\n\n` +
+            `You'll see progress in console windows. Please wait...`
+        );
+        
+        // Re-enable button after a delay
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-arrow-circle-down"></i> Update App';
+        }, 10000);
+        
+    } catch (error) {
+        console.error('Update error:', error);
+        statusDiv.textContent = `Error: ${error.message}`;
+        statusDiv.className = 'update-status-text error';
+        
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-arrow-circle-down"></i> Update App';
+        
+        addMessage('assistant', `❌ Update failed: ${error.message}`);
+    }
+}
+
+// ===================================
 // Initialization
 // ===================================
 async function initialize() {

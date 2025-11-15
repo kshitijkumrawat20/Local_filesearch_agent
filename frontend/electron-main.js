@@ -12,7 +12,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true
         },
-        title: 'Local Agent',
+        title: 'LEKHA - Ram Dhari Fintech',
         backgroundColor: '#f8fafc',
         show: false
     });

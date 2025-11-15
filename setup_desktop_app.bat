@@ -1,8 +1,9 @@
 @echo off
 echo.
 echo ============================================================
-echo   Local Agent - Complete Desktop App Setup
-echo   FastAPI Backend + Electron Desktop Application
+echo   LEKHA - Ram Dhari Fintech Private Limited
+echo   Personal Assistant to your growth
+echo   Complete Desktop App Setup
 echo ============================================================
 echo.
 
@@ -216,9 +217,9 @@ REM Create package.json
 echo Creating package.json...
 (
 echo {
-echo   "name": "local-agent",
+echo   "name": "lekha-ramdhari-fintech",
 echo   "version": "1.0.0",
-echo   "description": "AI-powered local agent desktop application",
+echo   "description": "LEKHA - Personal Assistant to your growth by Ram Dhari Fintech",
 echo   "main": "electron-main.js",
 echo   "scripts": {
 echo     "start": "electron .",
@@ -233,8 +234,8 @@ echo     "electron": "^28.0.0",
 echo     "electron-builder": "^24.9.1"
 echo   },
 echo   "build": {
-echo     "appId": "com.local.agent",
-echo     "productName": "LocalAgent",
+echo     "appId": "com.ramdhari.lekha",
+echo     "productName": "LEKHA",
 echo     "directories": {
 echo       "output": "dist",
 echo       "buildResources": "assets"
@@ -244,7 +245,7 @@ echo       "target": ["portable"],
 echo       "icon": "assets/icon.ico"
 echo     },
 echo     "portable": {
-echo       "artifactName": "LocalAgent.exe"
+echo       "artifactName": "LEKHA.exe"
 echo     }
 echo   }
 echo }
@@ -398,9 +399,9 @@ cd ..
 
 if "%BUILD_FAILED%"=="0" (
     REM Create shortcut to portable exe
-    if exist "frontend\dist\LocalAgent.exe" (
+    if exist "frontend\dist\LEKHA.exe" (
         echo Creating shortcut to portable executable...
-        powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Local Agent.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\frontend\dist\LocalAgent.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'AI-powered local agent'; $Shortcut.Save()"
+        powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\LEKHA.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\frontend\dist\LEKHA.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'LEKHA - Personal Assistant to your growth'; $Shortcut.Save()"
         echo Desktop shortcut created to portable executable!
     )
 ) else (
@@ -414,7 +415,7 @@ if "%BUILD_FAILED%"=="0" (
     echo call npm start
     ) > LAUNCH_APP.bat
     
-    powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Local Agent.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\LAUNCH_APP.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'AI-powered local agent'; $Shortcut.Save()"
+    powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\LEKHA.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\LAUNCH_APP.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'LEKHA - Personal Assistant to your growth'; $Shortcut.Save()"
     echo Desktop shortcut created!
 )
 
@@ -463,7 +464,7 @@ if "%BUILD_FAILED%"=="0" (
 echo   [✓] Desktop shortcut created
 echo.
 echo How to launch:
-echo   1. Double-click "Local Agent" on desktop
+echo   1. Double-click "LEKHA" on desktop
 if "%BUILD_FAILED%"=="1" (
     echo   2. Or run: cd frontend ^&^& npm start
 )

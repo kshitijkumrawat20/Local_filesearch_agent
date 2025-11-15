@@ -16,6 +16,7 @@ import os
 
 from agents.filesearch_agent import FileSearchAgent
 from tools.file_tools import FileTools
+from update_manager import router as update_router
 
 # Configure logging
 logging.basicConfig(
@@ -39,6 +40,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include update management routes
+app.include_router(update_router, tags=["updates"])
 
 # Global instances
 file_tools: Optional[FileTools] = None
@@ -147,7 +151,7 @@ async def health_check():
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Send a message to the AI agent
+    Send a message to the AI agent with retry logic for rate limiting
     
     The agent can:
     - Search files across your system
@@ -155,52 +159,98 @@ async def chat(request: ChatRequest):
     - Extract text from images (OCR)
     - Answer questions about your files
     """
-    try:
-        logger.info(f"💬 Chat request from session '{request.session_id}': {request.message[:50]}...")
-        
-        if not agent_executor:
-            raise HTTPException(status_code=503, detail="Agent not initialized")
-        
-        # Configure session
-        config = {"configurable": {"thread_id": request.session_id}}
-        
-        # Store session if new
-        if request.session_id not in sessions:
-            sessions[request.session_id] = {
-                "created_at": datetime.now().isoformat(),
-                "message_count": 0
-            }
-        
-        sessions[request.session_id]["message_count"] += 1
-        
-        # Stream agent response
-        response_text = ""
-        logger.info("🤖 Agent processing...")
-        
-        for event in agent_executor.stream(
-            {"messages": [{"role": "user", "content": request.message}]},
-            config=config,
-            stream_mode="values"
-        ):
-            if "messages" in event and len(event["messages"]) > 0:
-                last_msg = event["messages"][-1]
-                if hasattr(last_msg, 'content'):
-                    response_text = last_msg.content
-        
-        if not response_text:
-            response_text = "I apologize, but I couldn't generate a response. Please try rephrasing your question."
-        
-        logger.info(f"✅ Response generated ({len(response_text)} chars)")
-        
-        return ChatResponse(
-            response=response_text,
-            session_id=request.session_id,
-            timestamp=datetime.now().isoformat()
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ Chat error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
+    import time
+    
+    max_retries = 3
+    base_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"💬 Chat request from session '{request.session_id}': {request.message[:50]}... (Attempt {attempt + 1}/{max_retries})")
+            
+            if not agent_executor:
+                raise HTTPException(status_code=503, detail="Agent not initialized")
+            
+            # Configure session
+            config = {"configurable": {"thread_id": request.session_id}}
+            
+            # Store session if new
+            if request.session_id not in sessions:
+                sessions[request.session_id] = {
+                    "created_at": datetime.now().isoformat(),
+                    "message_count": 0
+                }
+            
+            sessions[request.session_id]["message_count"] += 1
+            
+            # Stream agent response
+            response_text = ""
+            logger.info("🤖 Agent processing...")
+            
+            for event in agent_executor.stream(
+                {"messages": [{"role": "user", "content": request.message}]},
+                config=config,
+                stream_mode="values"
+            ):
+                if "messages" in event and len(event["messages"]) > 0:
+                    last_msg = event["messages"][-1]
+                    if hasattr(last_msg, 'content'):
+                        response_text = last_msg.content
+            
+            if not response_text:
+                response_text = "I apologize, but I couldn't generate a response. Please try rephrasing your question."
+            
+            logger.info(f"✅ Response generated ({len(response_text)} chars)")
+            
+            return ChatResponse(
+                response=response_text,
+                session_id=request.session_id,
+                timestamp=datetime.now().isoformat()
+            )
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            # Check if it's a rate limit error (429) or related
+            is_rate_limit = (
+                "429" in error_str or 
+                "rate limit" in error_str or 
+                "rate_limit" in error_str or
+                "too many requests" in error_str or
+                "quota" in error_str
+            )
+            
+            # Check if it's a retryable error
+            is_retryable = (
+                is_rate_limit or
+                "timeout" in error_str or
+                "connection" in error_str or
+                "503" in error_str or
+                "502" in error_str
+            )
+            
+            # If it's the last attempt or not retryable, raise error
+            if attempt == max_retries - 1 or not is_retryable:
+                logger.error(f"❌ Chat error (final): {e}", exc_info=True)
+                
+                # Provide helpful error message for rate limits
+                if is_rate_limit:
+                    error_detail = (
+                        f"⚠️ Rate limit reached. The AI service has hit its usage limit. "
+                        f"Please wait a moment and try again. "
+                        f"\n\nOriginal error: {str(e)}"
+                    )
+                else:
+                    error_detail = f"Error processing message: {str(e)}"
+                
+                raise HTTPException(status_code=500, detail=error_detail)
+            
+            # Calculate delay with exponential backoff
+            delay = base_delay * (2 ** attempt)  # 2s, 4s, 8s
+            logger.warning(f"⏳ Retryable error detected: {e}. Waiting {delay}s before retry {attempt + 2}/{max_retries}...")
+            
+            # Wait before retrying
+            await asyncio.sleep(delay)
 
 # Index document endpoint
 @app.post("/api/index-document", response_model=IndexDocumentResponse)

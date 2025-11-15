@@ -18,12 +18,39 @@ def get_api_key() -> str:
 
 
 def get_llm_config() -> Dict[str, Any]:
-    """Get LLM configuration settings."""
-    return {
-        "model": "gpt-4o",  # or "qwen/qwen3-32b"
-        "temperature": 0.1,
-        "max_tokens": 2048
-    }
+    """Get LLM configuration settings with fallback options."""
+    # Check which API keys are available
+    has_openai = bool(os.getenv("OPENAI_API_KEY"))
+    has_groq = bool(os.getenv("GROQ_API_KEY"))
+    
+    # Prefer OpenAI, fallback to Groq if available
+    if has_openai:
+        return {
+            "provider": "openai",
+            "model": "gpt-4o-mini",  # More cost-effective, good for file search
+            "temperature": 0.1,
+            "max_tokens": 2048,
+            "max_retries": 3,
+            "timeout": 60
+        }
+    elif has_groq:
+        return {
+            "provider": "groq",
+            "model": "llama-3.3-70b-versatile",  # Fast and capable
+            "temperature": 0.1,
+            "max_tokens": 2048,
+            "max_retries": 3,
+            "timeout": 60
+        }
+    else:
+        # Last resort: use local Ollama if installed
+        return {
+            "provider": "ollama",
+            "model": "llama3.2:latest",
+            "temperature": 0.1,
+            "max_tokens": 2048,
+            "timeout": 120
+        }
 
 
 def get_app_config() -> Dict[str, Any]:

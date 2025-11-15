@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Agent</title>
+    <title>LEKHA - Ram Dhari Fintech</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -14,8 +14,11 @@
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <i class="fas fa-robot"></i>
-                <h1>Local Agent</h1>
+                <img src="lekha-logo.png" alt="LEKHA" style="width: 60px; height: 60px; margin-bottom: 10px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                <i class="fas fa-handshake" style="display: none; font-size: 48px; color: #e67e22; margin-bottom: 10px;"></i>
+                <h1>LEKHA</h1>
+                <p style="font-size: 11px; color: #94a3b8; margin-top: -5px; font-weight: 400;">Ram Dhari Fintech Private Limited</p>
+                <p style="font-size: 10px; color: #64748b; margin-top: 2px; font-style: italic;">Personal Assistant to your growth</p>
             </div>
             
             <div class="sidebar-section">
@@ -46,6 +49,13 @@
                 </button>
             </div>
             
+            <div class="sidebar-section">
+                <h3><i class="fas fa-sync-alt"></i> Updates</h3>
+                <button class="btn-update-app" onclick="updateApp()" id="updateAppBtn">
+                    <i class="fas fa-arrow-circle-down"></i> Update App
+                </button>
+                <div id="updateStatus" class="update-status-text"></div>
+            </div>
 
         </aside>
         
@@ -67,8 +77,9 @@
             <!-- Chat Messages -->
             <div class="chat-messages" id="chatMessages">
                 <div class="welcome-message">
-                    <i class="fas fa-robot"></i>
-                    <h2>Welcome to Local Agent! 👋</h2>
+                    <i class="fas fa-handshake" style="color: #e67e22;"></i>
+                    <h2>Welcome to LEKHA! 👋</h2>
+                    <p style="font-size: 14px; color: #64748b; margin-top: -10px;"><em>Personal Assistant to your growth</em></p>
                     <p>I can help you with:</p>
                     <ul>
                         <li><i class="fas fa-search"></i> Search for files across your system</li>
