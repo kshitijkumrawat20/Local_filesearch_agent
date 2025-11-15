@@ -294,7 +294,7 @@ function useExample(element) {
 // Initialization
 // ===================================
 async function initialize() {
-    console.log('🚀 Initializing File Search Agent UI...');
+    console.log('🚀 Initializing Local Agent UI...');
     
     // Load config
     loadConfig();

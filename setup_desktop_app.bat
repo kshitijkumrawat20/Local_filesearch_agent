@@ -1,7 +1,7 @@
 @echo off
 echo.
 echo ============================================================
-echo   Local File Search Agent - Complete Desktop App Setup
+echo   Local Agent - Complete Desktop App Setup
 echo   FastAPI Backend + Electron Desktop Application
 echo ============================================================
 echo.
@@ -143,19 +143,51 @@ if %ERRORLEVEL% EQU 0 (
     echo WARNING: Could not add to startup folder
 )
 
-REM Start backend now (silently in background, no window)
-echo Starting FastAPI backend now...
-wscript //nologo "%INSTALL_DIR%\start_backend_silent.vbs"
+REM Start backend with visible console to monitor indexing progress
+echo.
+echo ============================================================
+echo   Starting FastAPI Backend - Monitoring Indexing Progress
+echo ============================================================
+echo.
+echo Backend will now scan and index your files...
+echo This may take several minutes depending on your file count.
+echo.
 
-echo Waiting for backend to initialize...
+REM Start backend in a new visible window so we can see the indexing logs
+start "Local Agent Backend - File Indexing" cmd /c "cd /d "%INSTALL_DIR%" && call .venv\Scripts\activate && python -m uvicorn api_server:app --host 127.0.0.1 --port 8765"
+
+echo Waiting for backend to start...
 timeout /t 5 /nobreak >nul
 
-REM Check if backend is running
-powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8765/health' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
+REM Wait for backend to be ready and check if indexing is complete
+echo Checking backend status...
+:check_backend
+powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8765/health' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo Backend not ready yet, waiting...
+    timeout /t 3 /nobreak >nul
+    goto check_backend
+)
+
+echo Backend is running! Checking if indexing is complete...
+echo.
+echo Testing with a sample chat query...
+powershell -Command "$body = @{message='hello'} | ConvertTo-Json; try { $response = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/chat' -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 10; Write-Host 'Response received:' $response; exit 0 } catch { Write-Host 'Indexing still in progress or error occurred'; exit 1 }"
+
 if %ERRORLEVEL% EQU 0 (
-    echo Backend server started successfully!
+    echo.
+    echo ============================================================
+    echo   Backend Ready! Documents indexed and embedded.
+    echo ============================================================
+    echo.
 ) else (
-    echo WARNING: Backend may not be running, but continuing...
+    echo.
+    echo ============================================================
+    echo   Backend started but indexing may still be in progress.
+    echo   Check the backend window for indexing status.
+    echo   Press any key to continue with Electron setup...
+    echo ============================================================
+    pause
 )
 
 echo.
@@ -184,9 +216,9 @@ REM Create package.json
 echo Creating package.json...
 (
 echo {
-echo   "name": "local-file-search-agent",
+echo   "name": "local-agent",
 echo   "version": "1.0.0",
-echo   "description": "AI-powered local file search desktop application",
+echo   "description": "AI-powered local agent desktop application",
 echo   "main": "electron-main.js",
 echo   "scripts": {
 echo     "start": "electron .",
@@ -201,8 +233,8 @@ echo     "electron": "^28.0.0",
 echo     "electron-builder": "^24.9.1"
 echo   },
 echo   "build": {
-echo     "appId": "com.filesearch.agent",
-echo     "productName": "LocalFileSearchAgent",
+echo     "appId": "com.local.agent",
+echo     "productName": "LocalAgent",
 echo     "directories": {
 echo       "output": "dist",
 echo       "buildResources": "assets"
@@ -212,7 +244,7 @@ echo       "target": ["portable"],
 echo       "icon": "assets/icon.ico"
 echo     },
 echo     "portable": {
-echo       "artifactName": "LocalFileSearchAgent.exe"
+echo       "artifactName": "LocalAgent.exe"
 echo     }
 echo   }
 echo }
@@ -265,7 +297,7 @@ echo             nodeIntegration: false,
 echo             contextIsolation: true,
 echo             webSecurity: true
 echo         },
-echo         title: 'Local File Search Agent',
+echo         title: 'Local Agent',
 echo         backgroundColor: '#f8fafc',
 echo         show: false,
 echo         autoHideMenuBar: true
@@ -304,7 +336,7 @@ echo         { type: 'separator' },
 echo         { label: 'Quit', click: ^(^) =^> { app.isQuitting = true; app.quit^(^); } }
 echo     ]^);
 echo.
-echo     tray.setToolTip^('Local File Search Agent'^);
+echo     tray.setToolTip^('Local Agent'^);
 echo     tray.setContextMenu^(contextMenu^);
 echo     tray.on^('double-click', ^(^) =^> mainWindow.show^(^)^);
 echo }
@@ -366,9 +398,9 @@ cd ..
 
 if "%BUILD_FAILED%"=="0" (
     REM Create shortcut to portable exe
-    if exist "frontend\dist\LocalFileSearchAgent.exe" (
+    if exist "frontend\dist\LocalAgent.exe" (
         echo Creating shortcut to portable executable...
-        powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Local File Search Agent.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\frontend\dist\LocalFileSearchAgent.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'AI-powered local file search'; $Shortcut.Save()"
+        powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Local Agent.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\frontend\dist\LocalAgent.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'AI-powered local agent'; $Shortcut.Save()"
         echo Desktop shortcut created to portable executable!
     )
 ) else (
@@ -382,7 +414,7 @@ if "%BUILD_FAILED%"=="0" (
     echo call npm start
     ) > LAUNCH_APP.bat
     
-    powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Local File Search Agent.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\LAUNCH_APP.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'AI-powered local file search'; $Shortcut.Save()"
+    powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Local Agent.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\LAUNCH_APP.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.Description = 'AI-powered local agent'; $Shortcut.Save()"
     echo Desktop shortcut created!
 )
 
@@ -431,7 +463,7 @@ if "%BUILD_FAILED%"=="0" (
 echo   [✓] Desktop shortcut created
 echo.
 echo How to launch:
-echo   1. Double-click "Local File Search Agent" on desktop
+echo   1. Double-click "Local Agent" on desktop
 if "%BUILD_FAILED%"=="1" (
     echo   2. Or run: cd frontend ^&^& npm start
 )

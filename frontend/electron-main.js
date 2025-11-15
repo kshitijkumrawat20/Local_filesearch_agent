@@ -12,7 +12,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true
         },
-        title: 'Local File Search Agent',
+        title: 'Local Agent',
         backgroundColor: '#f8fafc',
         show: false
     });
