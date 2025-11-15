@@ -294,7 +294,7 @@ function useExample(element) {
 // Update Management
 // ===================================
 async function updateApp() {
-    if (!confirm('🔄 Update LEKHA from GitHub?\n\n' +
+    if (!confirm('🔄 Update application\n\n' +
                  '✅ Latest features and fixes\n' +
                  '✅ Your indexed documents will be preserved\n' +
                  '✅ App will restart automatically\n\n' +
