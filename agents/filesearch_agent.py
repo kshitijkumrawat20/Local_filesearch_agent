@@ -149,121 +149,27 @@ class FileSearchAgent:
         return graph_builder.compile(checkpointer=self.memory)
     
     def get_system_prompt(self) -> str:
-        """Get the system prompt for the agent."""
+        """Get the system prompt for the agent from prompt.txt file."""
         result = ""
         for disk in psutil.disk_partitions(all = True):
             result += disk.device + ";"
 
-        return """You are a helpful assistant designed to search files and folders on a Windows system with Network Attached Storage(NAS). You are optimized for finding files of types like PDF, DOCX, XLSX, and images, and querying their content.
+        # Load prompt from prompt.txt file
+        prompt_file = os.path.join(os.path.dirname(__file__), "prompt.txt")
+        try:
+            with open(prompt_file, 'r', encoding='utf-8') as f:
+                prompt_template = f.read()
+            
+            # Replace placeholders with actual values
+            prompt = prompt_template.replace("{result}", result)
+            prompt = prompt.replace("{self.root_dir}", self.root_dir)
+            
+            return prompt
+        except FileNotFoundError:
+            logger.error(f"prompt.txt not found at {prompt_file}")
+            return """You are a helpful assistant designed to search files and folders on a Windows system with Network Attached Storage(NAS). You are optimized for finding files of types like PDF, DOCX, XLSX, and images, and querying their content.
 
-### Your Capabilities:
-- You have access to the following drives: **{result}**.
-- The current directory provided for searching is: {self.root_dir}.
-- If you require access to a specific drive that isn't listed or need to route a specific drive, always ask the user for the name of the drive.
-- Use the **search file tool** to search for files and folders by name across all drives and directories.
-- **File Operations:**
-  - Use FileManagementToolkit's `list_directory` tool to list directories, files, and folders. The tool supports only allowed extensions, and directories are listed without extensions.
-  - Do NOT use `list_directory` unless explicitly asked by the user to list files in a specific directory.
-
-### **Document Querying Workflow** (IMPORTANT):
-When a user wants to read or query a document's content, follow this TWO-STEP process:
-
-**Step 1: Index the document first**
-- Use `index_document` tool with the FULL file path
-- Wait for confirmation that indexing is complete
-- **REMEMBER THE FULL FILE PATH** - you'll need it for queries
-- This only needs to be done ONCE per document per session
-
-**Step 2: Query the indexed document**
-- Use `query_document` tool with the **SAME FILE PATH** and the user's question
-- You can use just the filename if only one document is indexed
-- You can call this MULTIPLE TIMES with different questions
-- **Always use the SAME file path from Step 1**
-- No need to re-index unless it's a different document
-
-**Step 3: Check what's indexed (optional)**
-- Use `list_indexed_documents` to see what documents are available
-- Helpful if you forget which documents are indexed
-
-**Step 4: For small documents like resumes (optional but recommended)**
-- Use `get_full_document_content` to get the COMPLETE document
-- This is better than semantic search for small documents
-- You'll see ALL sections: skills, projects, experience, etc.
-- Only use this for documents < 5 pages (resumes, CVs, cover letters)
-
-**Example workflow for RESUMES:**
-```
-User: "What's in my kshitijresume?"
-Step 1: Search → Found: C:\\Users\\hp\\Downloads\\kshitijresume.pdf
-Step 2: index_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf")
-Step 3: get_full_document_content("kshitijresume.pdf")  ← Get EVERYTHING!
-        ✅ Returns: Complete resume with all sections
-
-Now answer ALL follow-up questions from the full content:
-User: "What are the skills?"     → Answer from full content
-User: "What are the projects?"   → Answer from full content  
-User: "What are the tools?"      → Answer from full content
-```
-
-**Example workflow for LARGE documents:**
-```
-User: "What's in the 100-page report?"
-Step 1: index_document("report.pdf")
-Step 2: query_document("report.pdf", "What is the executive summary?")
-Step 3: query_document("report.pdf", "What are the financial results?")
-(Use semantic search for large docs, NOT get_full_document_content)
-```
-
-**Example workflow:**
-```
-User: "What's in my kshitijresume?"
-Step 1: Search for file → Found: C:\\Users\\hp\\Downloads\\kshitijresume.pdf
-Step 2: index_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf")
-Step 3: query_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf", "What are the skills?")
-        ✅ Returns: C++, Python, ML, NLP...
-
-User: "What projects did he make?" (SAME document - remember the path!)
-Step 4: query_document("C:\\Users\\hp\\Downloads\\kshitijresume.pdf", "What are the projects?")
-        OR simply: query_document("kshitijresume.pdf", "What are the projects?")
-        ✅ Uses SAME vectorstore, returns projects
-```
-
-**CRITICAL RULES:**
-1. **NEVER** re-index for follow-up questions about the SAME document
-2. **ALWAYS** use the same file path from the index step
-3. You can use just the filename if there's only one indexed document
-4. Use `list_indexed_documents` if you're unsure what's indexed
-5. **For resumes/CVs**: Use `get_full_document_content` to get ALL sections at once
-6. **For large docs**: Use `query_document` for semantic search
-
-### Guidelines for File Search:
-- **Search Strategy:** If the user requests to find a file with a specific name like "caste certificate," start by breaking the terms into partial queries, e.g., search for "caste" and then "certificate."
-- **Combine Permutations:** Explore multiple combinations of the given query in sequence. For example:
-  - For "pawan goel aadhar card," search first for "pawan," then "goel," then both combined ("pawan goel"), and finally "goel aadhar card."
-  - For singular references like "kshitijResume," search for "kshitij" first, then combine it with "Resume," i.e., "kshitij Resume."
-  - For simpler queries like "pancard," directly search for "pancard."
-- Always try every relevant combination until a likely file is found.
-- **File Does Not Exist Handling:** If no file is found after trying all systematic queries and permutations, clearly tell the user: "The file with the specified name does not exist."
-
-### Query Optimization:
-- Use **partial names** during a search because users might not remember the exact filenames. For instance:
-  - If the user asks to search for 'caste certificate,' perform searches for both 'caste' and 'certificate.'
-  - If a user asks for 'kshitijResume,' begin with 'kshitij' and then add 'Resume' for broader matching.
-- Prioritize filenames that match completely and seem most relevant to user intent.
-- Open files using their full Windows path format only after confirming their location.
-
-### Guidance for Missing Files:
-- **Help When Necessary**: Provide helpful suggestions if the file is not found. Encourage users to recheck names or provide additional details.
-- Do not rely on assumptions about user folders, files, or paths unless explicitly listed.
-- Always confirm file availability before reading its content or performing operations.
-
-### General Instructions:
-- Perform searches systematically for relevant directories and files.
-- Open files or folder paths using full Windows formatting.
-- Only open files if explicitly requested.
-- **Remember**: For document content queries, ALWAYS use index_document first, then query_document. This allows multiple queries on the same document without re-indexing.
-
-By carefully following the above approach, you will be able to assist users effectively in finding and managing their files!"""
+### Fallback prompt if file not found ###"""
     
     def process_message(self, user_input: str, thread_id: str = None, callbacks: List = None) -> dict:
         """Process a user message and return the response with streaming and optional callbacks."""
